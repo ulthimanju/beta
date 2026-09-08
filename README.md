@@ -2,6 +2,8 @@
 
 An intelligent, agent-driven repository analysis system that fetches codebases and evaluates application architecture, ideology, methodology, and software principles.
 
+> **Design Focus**: Open-access tool with zero authentication barriers—engineered exclusively to focus on core repository cloning, CLI AI agent execution, and real-time architectural reporting.
+
 ---
 
 ## 1. High-Level Architecture
@@ -28,18 +30,34 @@ flowchart LR
 
 ---
 
-## 2. Repository Structure
+## 2. Analysis Execution Workflow
+
+The end-to-end analysis lifecycle follows these 8 sequential steps:
+
+1. **Receive Repository URL**: The user submits the target repository URL via the `web-app`.
+2. **Clone Repository**: `repoAnalyzer` clones the repository into an isolated temporary directory.
+3. **Set Working Directory**: The cloned repository directory is set as the active working directory for the execution context.
+4. **Invoke CLI AI Agent**: From the repository directory, execute the terminal command that invokes the CLI AI agent.
+5. **Dispatch Query**: Send the query `"analyze this repo using repo-analyzer skill"` to the AI agent using its default model.
+6. **Load Skill**: The AI agent loads and applies the `repo-analyzer` skill.
+7. **Perform Analysis**: The AI agent analyzes the repository according to the instructions defined in the `repo-analyzer` skill and its configuration.
+8. **Generate Output**: The AI agent generates the analysis output strictly according to the format and requirements specified by the `repo-analyzer` skill and configuration.
+
+---
+
+## 3. Repository Structure
 
 ```text
 beta/
 ├── README.md
+├── Requirements.md
 ├── repoAnalyzer/       # Microservice for repo ingestion & AI agent orchestration
 └── web-app/            # Single Page Application (SPA) frontend
 ```
 
 ---
 
-## 3. Technology Stack
+## 4. Technology Stack
 
 ### A. `repoAnalyzer` (Microservice)
 - **Language & Runtime**: Python 3.11+
@@ -65,12 +83,13 @@ beta/
   - Theme Definitions: Defined strictly via `tailwind.config.ts` and `globals.v4.css` (no ad-hoc token additions)
 
 ### C. `AI Agent`
-- **Status**: Framework & LLM Provider to be decided (e.g., Gemini, Claude, OpenAI, or local Ollama).
-- **Capabilities**: Repository exploration, structural querying, file path tracing, dependency direction checks, and holistic principle scoring.
+- **CLI Agent & Skill**: CLI AI agent invoked in working repo directory using the `repo-analyzer` skill.
+- **Model**: Default model configured for the CLI agent.
+- **Capabilities**: Deep repository exploration, structural analysis, pattern evaluation, and strict report formatting per skill instructions.
 
 ---
 
-## 4. Evaluation Rubrics & Core Criteria
+## 5. Evaluation Rubrics & Core Criteria
 
 The AI Agent evaluates codebases across four foundational dimensions:
 
@@ -89,6 +108,6 @@ The AI Agent evaluates codebases across four foundational dimensions:
 
 ---
 
-## 5. Getting Started
+## 6. Getting Started
 
 Detailed setup instructions for both `repoAnalyzer` and `web-app` will be added as each service is scaffolded.

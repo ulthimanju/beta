@@ -1,0 +1,92 @@
+import { Terminal, Sun, Moon, RefreshCw } from "lucide-react";
+
+interface NavbarProps {
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
+  onReset: () => void;
+  isAnalyzing: boolean;
+  hasResult: boolean;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({
+  darkMode,
+  onToggleDarkMode,
+  onReset,
+  isAnalyzing,
+  hasResult,
+}) => {
+  return (
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md">
+      <div className="container mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+        {/* Brand */}
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20 shadow-sm">
+            <Terminal className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold tracking-tight text-foreground text-lg">
+                RepoAnalyzer
+              </span>
+              <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent border border-accent/25">
+                AI Agent
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground hidden sm:block">
+              CLI Agent &middot; Architecture & Software Principles Auditor
+            </p>
+          </div>
+        </div>
+
+        {/* Status and Actions */}
+        <div className="flex items-center gap-3">
+          {/* Status Badge */}
+          <div className="hidden md:flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground shadow-xs">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                isAnalyzing
+                  ? "bg-accent animate-pulse"
+                  : hasResult
+                  ? "bg-primary"
+                  : "bg-muted-foreground/50"
+              }`}
+            />
+            <span>
+              {isAnalyzing
+                ? "Agent Analyzing..."
+                : hasResult
+                ? "Audit Complete"
+                : "CLI Agent Standby"}
+            </span>
+          </div>
+
+          {/* Reset / New Analysis Button */}
+          {hasResult && !isAnalyzing && (
+            <button
+              onClick={onReset}
+              className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors shadow-xs"
+              title="Reset analysis"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>New Audit</span>
+            </button>
+          )}
+
+          {/* Theme Toggle */}
+          <button
+            onClick={onToggleDarkMode}
+            className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-card text-foreground hover:bg-muted transition-colors shadow-xs"
+            aria-label="Toggle theme"
+            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {darkMode ? (
+              <Sun className="h-4 w-4 text-accent" />
+            ) : (
+              <Moon className="h-4 w-4 text-foreground" />
+            )}
+          </button>
+        </div>
+      </div>
+    </header>
+  );
+};
