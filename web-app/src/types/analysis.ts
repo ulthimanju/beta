@@ -25,23 +25,6 @@ export interface PillarScore {
   checklist: { label: string; passed: boolean; note?: string }[];
 }
 
-export interface FileEvidence {
-  path: string;
-  lineRange?: string;
-  observation: string;
-  type: "positive" | "warning" | "violation";
-}
-
-export interface Recommendation {
-  id: string;
-  priority: "High" | "Medium" | "Low";
-  title: string;
-  impact: string;
-  effort: string;
-  description: string;
-  affectedPillar: "Architecture" | "Ideology" | "Methodology" | "Principles";
-}
-
 export interface AnalysisReport {
   repoUrl: string;
   repoName: string;
@@ -59,7 +42,5 @@ export interface AnalysisReport {
     methodology: PillarScore;
     principles: PillarScore;
   };
-  evidence: FileEvidence[];
-  recommendations: Recommendation[];
   rawMarkdownOutput: string;
 }

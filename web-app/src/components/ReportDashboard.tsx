@@ -5,11 +5,8 @@ import {
   GitFork,
   ShieldCheck,
   Cpu,
-  FileCode2,
-  AlertTriangle,
   CheckCircle2,
   XCircle,
-  Lightbulb,
   Download,
   ExternalLink,
   FileText,
@@ -20,7 +17,7 @@ interface ReportDashboardProps {
 }
 
 export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
-  const [activeTab, setActiveTab] = useState<"pillars" | "evidence" | "recommendations" | "raw">("pillars");
+  const [activeTab, setActiveTab] = useState<"pillars" | "raw">("pillars");
 
   const handleDownloadReport = () => {
     const blob = new Blob([report.rawMarkdownOutput], { type: "text/markdown;charset=utf-8;" });
@@ -97,7 +94,7 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
 
             <button
               onClick={handleDownloadReport}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-xs hover:opacity-90 transition-opacity"
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
               title="Download Markdown Report"
             >
               <Download className="h-3.5 w-3.5" />
@@ -121,43 +118,19 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
       <div className="flex border-b border-border gap-2 text-sm">
         <button
           onClick={() => setActiveTab("pillars")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors ${
+          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors cursor-pointer ${
             activeTab === "pillars"
               ? "border-primary text-primary"
               : "border-transparent text-muted-foreground hover:text-foreground"
           }`}
         >
           <Layers className="h-4 w-4" />
-          <span>Evaluation Pillars</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("evidence")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors ${
-            activeTab === "evidence"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <FileCode2 className="h-4 w-4" />
-          <span>Code Evidence ({report.evidence.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("recommendations")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors ${
-            activeTab === "recommendations"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Lightbulb className="h-4 w-4" />
-          <span>Actionable Roadmap ({report.recommendations.length})</span>
+          <span>Evaluation Pillars (Scorecard)</span>
         </button>
 
         <button
           onClick={() => setActiveTab("raw")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors ${
+          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors cursor-pointer ${
             activeTab === "raw"
               ? "border-primary text-primary"
               : "border-transparent text-muted-foreground hover:text-foreground"
@@ -194,98 +167,7 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
         </div>
       )}
 
-      {/* Tab 2: Code Evidence */}
-      {activeTab === "evidence" && (
-        <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
-          {report.evidence.map((item, idx) => (
-            <div key={idx} className="p-4 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs font-semibold text-foreground">
-                    {item.path}
-                  </span>
-                  {item.lineRange && (
-                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground border border-border">
-                      {item.lineRange}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-foreground/80 leading-relaxed">
-                  {item.observation}
-                </p>
-              </div>
-
-              <div className="shrink-0">
-                {item.type === "positive" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-medium text-primary border border-primary/20">
-                    <CheckCircle2 className="h-3 w-3" />
-                    <span>Conforms</span>
-                  </span>
-                )}
-                {item.type === "warning" && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-0.5 text-[11px] font-medium text-destructive border border-destructive/20">
-                    <AlertTriangle className="h-3 w-3" />
-                    <span>Warning</span>
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Tab 3: Actionable Recommendations */}
-      {activeTab === "recommendations" && (
-        <div className="space-y-3">
-          {report.recommendations.map((rec) => (
-            <div
-              key={rec.id}
-              className="rounded-xl border border-border bg-card p-4 shadow-xs space-y-2"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                      rec.priority === "High"
-                        ? "bg-destructive/15 text-destructive border border-destructive/30"
-                        : rec.priority === "Medium"
-                        ? "bg-accent/15 text-accent border border-accent/30"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {rec.priority} Priority
-                  </span>
-                  <span className="font-mono text-xs text-muted-foreground font-semibold">
-                    {rec.id}
-                  </span>
-                  <span className="rounded bg-muted px-2 py-0.5 text-[11px] font-medium text-foreground">
-                    {rec.affectedPillar}
-                  </span>
-                </div>
-
-                <div className="text-xs text-muted-foreground flex items-center gap-2">
-                  <span>Effort: <strong className="text-foreground">{rec.effort}</strong></span>
-                </div>
-              </div>
-
-              <h4 className="text-sm font-semibold text-foreground">
-                {rec.title}
-              </h4>
-
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {rec.description}
-              </p>
-
-              <div className="pt-2 border-t border-border flex items-center gap-1 text-xs text-foreground/90">
-                <strong className="text-primary font-medium">Impact:</strong>
-                <span>{rec.impact}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Tab 4: Raw Skill Markdown */}
+      {/* Tab 2: Raw Skill Markdown */}
       {activeTab === "raw" && (
         <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
           <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
@@ -294,7 +176,7 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
             </span>
             <button
               onClick={handleDownloadReport}
-              className="flex items-center gap-1 text-xs text-primary hover:underline font-medium"
+              className="flex items-center gap-1 text-xs text-primary hover:underline font-medium cursor-pointer"
             >
               <Download className="h-3.5 w-3.5" />
               <span>Download Raw Markdown</span>
