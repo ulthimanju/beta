@@ -5,7 +5,7 @@ import { ExecutionProgress } from "./components/ExecutionProgress";
 import { ReportDashboard } from "./components/ReportDashboard";
 import type { WorkflowStep, TerminalLogEntry, AnalysisReport } from "./types/analysis";
 import { INITIAL_WORKFLOW_STEPS } from "./mock/sampleData";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { CheckCircle2, AlertCircle, FolderGit2 } from "lucide-react";
 
 interface Step1Session {
   sessionId: string;
@@ -14,6 +14,15 @@ interface Step1Session {
   repoName: string;
   receivedAt: string;
   message: string;
+}
+
+interface Step2CloneInfo {
+  tempDir: string;
+  commitHash: string;
+  branch: string;
+  fileCount: number;
+  sizeBytes: number;
+  durationMs: number;
 }
 
 export function App() {
@@ -27,6 +36,7 @@ export function App() {
   const [logs, setLogs] = useState<TerminalLogEntry[]>([]);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [step1Session, setStep1Session] = useState<Step1Session | null>(null);
+  const [step2CloneInfo, setStep2CloneInfo] = useState<Step2CloneInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -54,13 +64,16 @@ export function App() {
     setReport(null);
     setErrorMessage(null);
     setStep1Session(null);
+    setStep2CloneInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
     const freshSteps = INITIAL_WORKFLOW_STEPS.map((s) => ({ ...s, status: "idle" as const }));
     setSteps(freshSteps);
 
-    // Set Step 1 to running
+    // ==========================================
+    // STEP 1: Receive & Validate Repository URL
+    // ==========================================
     setCurrentStepIndex(0);
     setSteps((prev) =>
       prev.map((s, i) => (i === 0 ? { ...s, status: "running" } : s))
@@ -69,15 +82,18 @@ export function App() {
     addLog("info", `[Step 1/8] Initiating Step 1: Receiving & validating repository URL...`);
     addLog("info", `[Step 1/8] Target URL: ${repoUrl}`);
 
+    let sessionId = "";
+    let validatedRepoUrl = repoUrl;
+    let owner = "";
+    let repoName = "";
+
     try {
-      // Call backend API endpoint for Step 1
       let res = await fetch("/api/v1/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo_url: repoUrl }),
       }).catch(() => null);
 
-      // Fallback directly to localhost:8000 if proxy fails
       if (!res || !res.ok) {
         if (!res || res.status === 404 || res.status === 502) {
           const directRes = await fetch("http://localhost:8000/api/v1/analyze", {
@@ -100,33 +116,107 @@ export function App() {
         throw new Error(errorDetail);
       }
 
-      // Step 1 Success
-      addLog("system", `[Step 1/8] Session generated: ${data.session_id}`);
-      addLog("info", `[Step 1/8] Repository verified: ${data.owner}/${data.repo_name}`);
+      sessionId = data.session_id;
+      validatedRepoUrl = data.repo_url;
+      owner = data.owner;
+      repoName = data.repo_name;
+
+      addLog("system", `[Step 1/8] Session generated: ${sessionId}`);
+      addLog("info", `[Step 1/8] Repository verified: ${owner}/${repoName}`);
       addLog("agent", `[Step 1/8] Step 1 Complete: Repository URL received and verified.`);
-      addLog("system", `[Info] Step 1 prototype complete. Ready for Step 2 (Clone repository into temporary directory).`);
 
       setStep1Session({
-        sessionId: data.session_id,
-        repoUrl: data.repo_url,
-        owner: data.owner,
-        repoName: data.repo_name,
+        sessionId,
+        repoUrl: validatedRepoUrl,
+        owner,
+        repoName,
         receivedAt: data.received_at,
         message: data.message,
       });
 
-      // Mark Step 1 as completed, remaining steps stay idle
+      // Mark Step 1 completed
       setSteps((prev) =>
         prev.map((s, i) => (i === 0 ? { ...s, status: "completed" } : s))
       );
-      setCurrentStepIndex(-1);
-      setIsAnalyzing(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
       addLog("warn", `[Step 1/8] Validation Failed: ${msg}`);
       setErrorMessage(msg);
       setSteps((prev) =>
         prev.map((s, i) => (i === 0 ? { ...s, status: "failed" } : s))
+      );
+      setCurrentStepIndex(-1);
+      setIsAnalyzing(false);
+      return;
+    }
+
+    // ==========================================
+    // STEP 2: Clone into Temporary Directory
+    // ==========================================
+    setCurrentStepIndex(1);
+    setSteps((prev) =>
+      prev.map((s, i) => (i === 1 ? { ...s, status: "running" } : s))
+    );
+
+    addLog("system", `[Step 2/8] Creating temporary sandbox directory for session ${sessionId.slice(0, 8)}...`);
+    addLog("system", `[Step 2/8] Executing git clone --depth 1 ${validatedRepoUrl}...`);
+
+    try {
+      let cloneRes = await fetch("/api/v1/clone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, repo_url: validatedRepoUrl }),
+      }).catch(() => null);
+
+      if (!cloneRes || !cloneRes.ok) {
+        if (!cloneRes || cloneRes.status === 404 || cloneRes.status === 502) {
+          const directClone = await fetch("http://localhost:8000/api/v1/clone", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId, repo_url: validatedRepoUrl }),
+          }).catch(() => null);
+          if (directClone) cloneRes = directClone;
+        }
+      }
+
+      if (!cloneRes) {
+        throw new Error("Unable to reach backend /api/v1/clone endpoint");
+      }
+
+      const cloneData = await cloneRes.json();
+
+      if (!cloneRes.ok) {
+        const errDetail = cloneData.detail || `Clone failed with status ${cloneRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 2/8] Clone complete: ${cloneData.file_count} files unpacked (${(cloneData.size_bytes / 1024).toFixed(1)} KB) in ${cloneData.duration_ms}ms.`);
+      addLog("info", `[Step 2/8] Branch: ${cloneData.branch} | HEAD Commit: ${cloneData.commit_hash}`);
+      addLog("info", `[Step 2/8] Temporary sandbox directory: ${cloneData.temp_dir}`);
+      addLog("agent", `[Step 2/8] Step 2 Complete: Repository cloned into isolated workspace.`);
+      addLog("system", `[Info] Step 2 prototype complete. Ready for Step 3 (Set cloned directory as working directory).`);
+
+      setStep2CloneInfo({
+        tempDir: cloneData.temp_dir,
+        commitHash: cloneData.commit_hash,
+        branch: cloneData.branch,
+        fileCount: cloneData.file_count,
+        sizeBytes: cloneData.size_bytes,
+        durationMs: cloneData.duration_ms,
+      });
+
+      // Mark Step 2 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 1 ? { ...s, status: "completed" } : s))
+      );
+      setCurrentStepIndex(-1);
+      setIsAnalyzing(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "An error occurred during clone.";
+      addLog("warn", `[Step 2/8] Clone Failed: ${msg}`);
+      setErrorMessage(msg);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 1 ? { ...s, status: "failed" } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -140,6 +230,7 @@ export function App() {
     setLogs([]);
     setReport(null);
     setStep1Session(null);
+    setStep2CloneInfo(null);
     setErrorMessage(null);
   };
 
@@ -167,18 +258,19 @@ export function App() {
           <div className="mx-auto max-w-5xl my-4 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
             <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
             <div>
-              <strong className="font-semibold block">Step 1 Error</strong>
+              <strong className="font-semibold block">Execution Error</strong>
               <span>{errorMessage}</span>
             </div>
           </div>
         )}
 
-        {/* Step 1 Completion Card */}
+        {/* Step 1 & Step 2 Status Cards */}
         {step1Session && (
-          <div className="mx-auto max-w-5xl my-4 rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="mx-auto max-w-5xl my-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Step 1 Card */}
+            <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
                   <CheckCircle2 className="h-5 w-5" />
                 </div>
                 <div>
@@ -187,7 +279,7 @@ export function App() {
                       Step 1 Completed
                     </span>
                     <span className="font-mono text-xs text-muted-foreground">
-                      Session: {step1Session.sessionId.slice(0, 8)}...
+                      {step1Session.sessionId.slice(0, 8)}...
                     </span>
                   </div>
                   <h3 className="text-sm font-semibold text-foreground">
@@ -195,12 +287,39 @@ export function App() {
                   </h3>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono bg-card px-3 py-1.5 rounded-lg border border-border shrink-0">
-                <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
-                <span>Ready for Step 2: Clone to temp directory</span>
-              </div>
             </div>
+
+            {/* Step 2 Card */}
+            {step2CloneInfo ? (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0">
+                    <FolderGit2 className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-primary">
+                        Step 2 Completed
+                      </span>
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {step2CloneInfo.durationMs}ms
+                      </span>
+                    </div>
+                    <p className="text-xs font-mono text-foreground truncate" title={step2CloneInfo.tempDir}>
+                      {step2CloneInfo.tempDir}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch} ({step2CloneInfo.commitHash})
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
+                <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
+                <span>Cloning in progress...</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -223,11 +342,11 @@ export function App() {
             <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Step-by-Step Architecture Pipeline
           </p>
           <div className="flex items-center gap-4 text-[11px]">
-            <span>Step 1/8 Live</span>
+            <span>Step 2/8 Live</span>
             <span>&middot;</span>
-            <span>FastAPI Backend Connected</span>
+            <span>Shallow Git Cloner</span>
             <span>&middot;</span>
-            <span>Pydantic URL Validator</span>
+            <span>Sandbox Workspace</span>
           </div>
         </div>
       </footer>

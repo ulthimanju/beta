@@ -35,3 +35,27 @@ class RepoSubmitResponse(BaseModel):
     status: str = "received"
     message: str
     received_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class CloneRepoRequest(BaseModel):
+    """Schema for requesting repository clone in Step 2."""
+    session_id: str = Field(..., description="Unique session ID from Step 1")
+    repo_url: str = Field(..., description="Target repository URL verified in Step 1")
+
+
+class CloneRepoResponse(BaseModel):
+    """Schema for response when repository is cloned in Step 2."""
+    session_id: str
+    repo_url: str
+    owner: str
+    repo_name: str
+    temp_dir: str
+    commit_hash: str
+    branch: str
+    file_count: int
+    size_bytes: int
+    duration_ms: float
+    step: int = 2
+    step_title: str = "Clone Repository"
+    status: str = "cloned"
+    message: str
