@@ -4,7 +4,17 @@ import { RepoInputSection } from "./components/RepoInputSection";
 import { ExecutionProgress } from "./components/ExecutionProgress";
 import { ReportDashboard } from "./components/ReportDashboard";
 import type { WorkflowStep, TerminalLogEntry, AnalysisReport } from "./types/analysis";
-import { INITIAL_WORKFLOW_STEPS, SAMPLE_REPORT } from "./mock/sampleData";
+import { INITIAL_WORKFLOW_STEPS } from "./mock/sampleData";
+import { CheckCircle2, AlertCircle } from "lucide-react";
+
+interface Step1Session {
+  sessionId: string;
+  repoUrl: string;
+  owner: string;
+  repoName: string;
+  receivedAt: string;
+  message: string;
+}
 
 export function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -15,7 +25,9 @@ export function App() {
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [logs, setLogs] = useState<TerminalLogEntry[]>([]);
-  const [report, setReport] = useState<AnalysisReport | null>(SAMPLE_REPORT);
+  const [report, setReport] = useState<AnalysisReport | null>(null);
+  const [step1Session, setStep1Session] = useState<Step1Session | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
   useEffect(() => {
@@ -37,94 +49,88 @@ export function App() {
     setLogs((prev) => [...prev, { timestamp, level, message }]);
   };
 
-  const handleStartAnalysis = (repoUrl: string) => {
+  const handleStartAnalysis = async (repoUrl: string) => {
     setIsAnalyzing(true);
     setReport(null);
+    setErrorMessage(null);
+    setStep1Session(null);
     setLogs([]);
 
-    const repoSlug = repoUrl.replace("https://github.com/", "");
-
-    // Reset steps
+    // Initialize all steps to idle
     const freshSteps = INITIAL_WORKFLOW_STEPS.map((s) => ({ ...s, status: "idle" as const }));
     setSteps(freshSteps);
 
-    // Run realistic simulation of the 8 steps
-    const stepTimings = [700, 1100, 600, 800, 900, 1000, 1800, 800];
+    // Set Step 1 to running
+    setCurrentStepIndex(0);
+    setSteps((prev) =>
+      prev.map((s, i) => (i === 0 ? { ...s, status: "running" } : s))
+    );
 
-    const runStep = (index: number) => {
-      if (index >= 8) {
-        setIsAnalyzing(false);
-        setCurrentStepIndex(-1);
-        addLog("system", "Pipeline completed successfully. Rendering architectural report.");
-        setReport({
-          ...SAMPLE_REPORT,
-          repoUrl,
-          repoName: repoSlug.split("/").pop() || "analyzed-repo",
-          analyzedAt: "Just now",
-        });
-        return;
+    addLog("info", `[Step 1/8] Initiating Step 1: Receiving & validating repository URL...`);
+    addLog("info", `[Step 1/8] Target URL: ${repoUrl}`);
+
+    try {
+      // Call backend API endpoint for Step 1
+      let res = await fetch("/api/v1/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo_url: repoUrl }),
+      }).catch(() => null);
+
+      // Fallback directly to localhost:8000 if proxy fails
+      if (!res || !res.ok) {
+        if (!res || res.status === 404 || res.status === 502) {
+          const directRes = await fetch("http://localhost:8000/api/v1/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ repo_url: repoUrl }),
+          }).catch(() => null);
+          if (directRes) res = directRes;
+        }
       }
 
-      setCurrentStepIndex(index);
+      if (!res) {
+        throw new Error("Unable to connect to repoAnalyzer backend service at http://localhost:8000");
+      }
 
-      // Set running status
+      const data = await res.json();
+
+      if (!res.ok) {
+        const errorDetail = data.detail || `Server returned error (${res.status})`;
+        throw new Error(errorDetail);
+      }
+
+      // Step 1 Success
+      addLog("system", `[Step 1/8] Session generated: ${data.session_id}`);
+      addLog("info", `[Step 1/8] Repository verified: ${data.owner}/${data.repo_name}`);
+      addLog("agent", `[Step 1/8] Step 1 Complete: Repository URL received and verified.`);
+      addLog("system", `[Info] Step 1 prototype complete. Ready for Step 2 (Clone repository into temporary directory).`);
+
+      setStep1Session({
+        sessionId: data.session_id,
+        repoUrl: data.repo_url,
+        owner: data.owner,
+        repoName: data.repo_name,
+        receivedAt: data.received_at,
+        message: data.message,
+      });
+
+      // Mark Step 1 as completed, remaining steps stay idle
       setSteps((prev) =>
-        prev.map((s, i) => {
-          if (i === index) return { ...s, status: "running" };
-          if (i < index) return { ...s, status: "completed" };
-          return { ...s, status: "idle" };
-        })
+        prev.map((s, i) => (i === 0 ? { ...s, status: "completed" } : s))
       );
-
-      // Emit realistic step logs
-      switch (index) {
-        case 0:
-          addLog("info", `[Step 1/8] Received repository target: ${repoUrl}`);
-          addLog("info", `[Step 1/8] GitHub URL format verified. Remote head accessible.`);
-          break;
-        case 1:
-          addLog("system", `[Step 2/8] Creating temporary sandbox directory: /tmp/repo-sandbox-${Date.now().toString(36)}`);
-          addLog("system", `[Step 2/8] Executing git clone --depth 1 ${repoUrl}...`);
-          addLog("info", `[Step 2/8] Clone complete. 142 files indexed, 12.4 MB unpack.`);
-          break;
-        case 2:
-          addLog("system", `[Step 3/8] Process current working directory switched to sandbox root.`);
-          addLog("info", `[Step 3/8] Working directory verified: Cwd set successfully.`);
-          break;
-        case 3:
-          addLog("agent", `[Step 4/8] Executing CLI AI agent terminal command from repository root...`);
-          addLog("agent", `[Step 4/8] Process spawned. Agent CLI bridge initialized.`);
-          break;
-        case 4:
-          addLog("agent", `[Step 5/8] Dispatching query: "analyze this repo using repo-analyzer skill"`);
-          addLog("info", `[Step 5/8] Query delivered to CLI AI agent using default model.`);
-          break;
-        case 5:
-          addLog("agent", `[Step 6/8] CLI AI agent loading skill: 'repo-analyzer'`);
-          addLog("agent", `[Step 6/8] Skill loaded: Rubrics for Architecture, Ideology, Methodology & Principles loaded.`);
-          break;
-        case 6:
-          addLog("agent", `[Step 7/8] AI agent actively analyzing codebase tree & source files...`);
-          addLog("info", `[Step 7/8] Inspecting directory boundaries and inward dependency directions.`);
-          addLog("info", `[Step 7/8] Evaluating Domain-Driven Design aggregates & service layers.`);
-          addLog("info", `[Step 7/8] Inspecting testing pyramid and CI workflow definitions.`);
-          addLog("info", `[Step 7/8] Validating SOLID principles, DRY violations, and security headers.`);
-          break;
-        case 7:
-          addLog("agent", `[Step 8/8] Synthesizing evaluation output strictly to repo-analyzer specification...`);
-          addLog("info", `[Step 8/8] Output verified against schema. Preparing response payload.`);
-          break;
-      }
-
-      setTimeout(() => {
-        setSteps((prev) =>
-          prev.map((s, i) => (i === index ? { ...s, status: "completed" } : s))
-        );
-        runStep(index + 1);
-      }, stepTimings[index]);
-    };
-
-    runStep(0);
+      setCurrentStepIndex(-1);
+      setIsAnalyzing(false);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
+      addLog("warn", `[Step 1/8] Validation Failed: ${msg}`);
+      setErrorMessage(msg);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 0 ? { ...s, status: "failed" } : s))
+      );
+      setCurrentStepIndex(-1);
+      setIsAnalyzing(false);
+    }
   };
 
   const handleReset = () => {
@@ -133,6 +139,8 @@ export function App() {
     setIsAnalyzing(false);
     setLogs([]);
     setReport(null);
+    setStep1Session(null);
+    setErrorMessage(null);
   };
 
   return (
@@ -143,7 +151,7 @@ export function App() {
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         onReset={handleReset}
         isAnalyzing={isAnalyzing}
-        hasResult={report !== null}
+        hasResult={step1Session !== null || report !== null}
       />
 
       {/* Main Container */}
@@ -154,6 +162,48 @@ export function App() {
           isAnalyzing={isAnalyzing}
         />
 
+        {/* Error Alert */}
+        {errorMessage && (
+          <div className="mx-auto max-w-5xl my-4 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-semibold block">Step 1 Error</strong>
+              <span>{errorMessage}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Step 1 Completion Card */}
+        {step1Session && (
+          <div className="mx-auto max-w-5xl my-4 rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-accent">
+                      Step 1 Completed
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      Session: {step1Session.sessionId.slice(0, 8)}...
+                    </span>
+                  </div>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {step1Session.owner} / {step1Session.repoName}
+                  </h3>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono bg-card px-3 py-1.5 rounded-lg border border-border shrink-0">
+                <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+                <span>Ready for Step 2: Clone to temp directory</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 8-Step Lifecycle Stepper & CLI Terminal Drawer */}
         <ExecutionProgress
           steps={steps}
@@ -162,7 +212,7 @@ export function App() {
           isAnalyzing={isAnalyzing}
         />
 
-        {/* Audit Report Presentation */}
+        {/* Audit Report Presentation (if available) */}
         {report && <ReportDashboard report={report} />}
       </main>
 
@@ -170,14 +220,14 @@ export function App() {
       <footer className="border-t border-border bg-card py-6 text-center text-xs text-muted-foreground">
         <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p>
-            <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Automated Codebase &amp; Architecture Audit
+            <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Step-by-Step Architecture Pipeline
           </p>
           <div className="flex items-center gap-4 text-[11px]">
-            <span>FastAPI Microservice Bridge</span>
+            <span>Step 1/8 Live</span>
             <span>&middot;</span>
-            <span>CLI AI Agent Protocol</span>
+            <span>FastAPI Backend Connected</span>
             <span>&middot;</span>
-            <span>repo-analyzer Skill</span>
+            <span>Pydantic URL Validator</span>
           </div>
         </div>
       </footer>
