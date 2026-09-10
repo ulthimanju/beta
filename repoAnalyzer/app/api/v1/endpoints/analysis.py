@@ -9,11 +9,14 @@ from app.schemas.analysis import (
     RepoSubmitResponse,
     CloneRepoRequest,
     CloneRepoResponse,
+    SetWorkingDirRequest,
+    SetWorkingDirResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
 from app.services.git_cloner import clone_repository_into_sandbox, GitCloneError
-from app.services.sandbox_manager import sandbox_manager
+from app.services.sandbox_manager import sandbox_manager, SandboxError
+
 
 logger = get_logger("analysis_endpoint")
 router = APIRouter()
@@ -148,6 +151,54 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
         step_title="Clone Repository into Sandbox",
         status="cloned",
         message=f"Step 2 Successful: Repository cloned directly into Session Sandbox '{clone_result['sandbox_root']}' ({clone_result['file_count']} files, branch: {clone_result['branch']}) in {clone_result['duration_ms']}ms.",
+    )
+
+
+@router.post(
+    "/set-working-dir",
+    response_model=SetWorkingDirResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 3: Set cloned repository directory as working directory",
+    description="Validates and sets the cloned repository directory within the Session Sandbox as the execution working directory for AI agent commands.",
+)
+async def set_working_directory_endpoint(payload: SetWorkingDirRequest) -> SetWorkingDirResponse:
+    """Execute Step 3 of the analysis pipeline."""
+    session_id = payload.session_id
+    sandbox = sandbox_manager.get_sandbox(session_id)
+    if not sandbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sandbox for session '{session_id}' not found or already closed.",
+        )
+
+    logger.info("Step 3: Setting working directory inside Session Sandbox", session_id=session_id)
+
+    try:
+        result = sandbox.set_working_directory(payload.target_subpath)
+    except SandboxError as e:
+        logger.error("Step 3 failed to set working directory", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Step 3 Failed: {str(e)}",
+        )
+
+    frameworks_str = ", ".join(result["detected_frameworks"]) if result["detected_frameworks"] else "General/Plain"
+
+    return SetWorkingDirResponse(
+        session_id=session_id,
+        sandbox_root=result["sandbox_root"],
+        working_dir=result["working_dir"],
+        relative_working_dir=result["relative_working_dir"],
+        repo_name=result["repo_name"],
+        is_git_worktree=result["is_git_worktree"],
+        readme_present=result["readme_present"],
+        detected_frameworks=result["detected_frameworks"],
+        top_level_entries=result["top_level_entries"],
+        step=3,
+        step_title="Set Working Directory",
+        status="configured",
+        message=f"Step 3 Successful: Active working directory locked to '{result['relative_working_dir']}' inside sandbox. Git worktree verified: {result['is_git_worktree']}. Detected stacks: {frameworks_str}.",
     )
 
 

@@ -36,12 +36,14 @@ class SessionSandbox:
             self.root_dir = os.path.join(tempfile.gettempdir(), "repo_sandboxes", f"sandbox_{session_id}")
 
         self.repo_dir: Optional[str] = None
+        self.working_dir: Optional[str] = None
         self.active_processes: list[asyncio.subprocess.Process] = []
 
     def initialize(self) -> str:
         """Create the isolated sandbox directory on disk."""
         os.makedirs(self.root_dir, exist_ok=True)
         self.status = "active"
+        self.working_dir = self.root_dir
         logger.info("Sandbox initialized", session_id=self.session_id, path=self.root_dir)
         return self.root_dir
 
@@ -50,8 +52,97 @@ class SessionSandbox:
         self.repo_dir = os.path.join(self.root_dir, repo_dir_name)
         return self.repo_dir
 
+    def set_working_directory(self, target_path: Optional[str] = None) -> dict[str, Any]:
+        """
+        Step 3: Set and verify the working directory inside the sandbox.
+        Ensures strict boundary security (no directory traversal outside sandbox root).
+        Inspects directory contents and detects ecosystem/project framework markers.
+        """
+        if target_path is None:
+            if self.repo_dir and os.path.exists(self.repo_dir):
+                target_path = self.repo_dir
+            else:
+                target_path = self.root_dir
+
+        resolved_target = os.path.abspath(target_path)
+        resolved_root = os.path.abspath(self.root_dir)
+
+        # Sandbox boundary security check
+        try:
+            common = os.path.commonpath([resolved_root, resolved_target])
+            if common != resolved_root:
+                raise SandboxError(f"Security violation: Target directory '{target_path}' lies outside sandbox boundary.")
+        except ValueError:
+            raise SandboxError(f"Security violation: Target directory '{target_path}' is on an invalid path.")
+
+        if not os.path.exists(resolved_target):
+            raise SandboxError(f"Working directory does not exist: '{resolved_target}'")
+
+        if not os.path.isdir(resolved_target):
+            raise SandboxError(f"Target path is not a directory: '{resolved_target}'")
+
+        self.working_dir = resolved_target
+
+        # Inspect entries
+        try:
+            entries = sorted(os.listdir(resolved_target))
+        except OSError as e:
+            raise SandboxError(f"Failed to read directory contents: {str(e)}")
+
+        is_git_worktree = os.path.isdir(os.path.join(resolved_target, ".git"))
+        readme_present = any(e.lower().startswith("readme") for e in entries)
+
+        # Detect frameworks and project markers
+        detected_frameworks: list[str] = []
+        entry_set = set(entries)
+
+        if "package.json" in entry_set:
+            detected_frameworks.append("Node.js / TypeScript")
+        if any(f in entry_set for f in ("pyproject.toml", "requirements.txt", "Pipfile", "setup.py", "poetry.lock")):
+            detected_frameworks.append("Python")
+        if "go.mod" in entry_set:
+            detected_frameworks.append("Go")
+        if "Cargo.toml" in entry_set:
+            detected_frameworks.append("Rust")
+        if any(f in entry_set for f in ("pom.xml", "build.gradle", "build.gradle.kts")):
+            detected_frameworks.append("Java / Kotlin")
+        if "composer.json" in entry_set:
+            detected_frameworks.append("PHP")
+        if "Gemfile" in entry_set:
+            detected_frameworks.append("Ruby")
+        if any(f in entry_set for f in ("Dockerfile", "docker-compose.yml", "compose.yaml", "Containerfile")):
+            detected_frameworks.append("Docker / Container")
+        if "Makefile" in entry_set:
+            detected_frameworks.append("Make")
+
+        relative_path = os.path.relpath(resolved_target, self.root_dir)
+        repo_name = os.path.basename(resolved_target)
+
+        logger.info(
+            "Working directory set inside Session Sandbox",
+            session_id=self.session_id,
+            working_dir=self.working_dir,
+            relative_path=relative_path,
+            frameworks=detected_frameworks,
+            files_count=len(entries),
+        )
+
+        return {
+            "session_id": self.session_id,
+            "sandbox_root": self.root_dir,
+            "working_dir": self.working_dir,
+            "relative_working_dir": relative_path if relative_path != "." else "./",
+            "repo_name": repo_name,
+            "is_git_worktree": is_git_worktree,
+            "readme_present": readme_present,
+            "detected_frameworks": detected_frameworks,
+            "top_level_entries": entries[:25],
+        }
+
     def get_working_directory(self) -> str:
         """Return the current working directory inside the sandbox."""
+        if self.working_dir and os.path.exists(self.working_dir):
+            return self.working_dir
         if self.repo_dir and os.path.exists(self.repo_dir):
             return self.repo_dir
         return self.root_dir

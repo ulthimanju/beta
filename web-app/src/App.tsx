@@ -5,7 +5,16 @@ import { ExecutionProgress } from "./components/ExecutionProgress";
 import { ReportDashboard } from "./components/ReportDashboard";
 import type { WorkflowStep, TerminalLogEntry, AnalysisReport } from "./types/analysis";
 import { INITIAL_WORKFLOW_STEPS } from "./mock/sampleData";
-import { CheckCircle2, AlertCircle, Box, Trash2, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertCircle,
+  Box,
+  Trash2,
+  ShieldCheck,
+  FolderGit2,
+  FolderCheck,
+  Layers,
+} from "lucide-react";
 
 interface Step1Session {
   sessionId: string;
@@ -27,6 +36,17 @@ interface Step2CloneInfo {
   durationMs: number;
 }
 
+interface Step3WorkingDirInfo {
+  workingDir: string;
+  relativeWorkingDir: string;
+  repoName: string;
+  isGitWorktree: boolean;
+  readmePresent: boolean;
+  detectedFrameworks: string[];
+  topLevelEntries: string[];
+}
+
+
 export function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -40,6 +60,7 @@ export function App() {
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [step1Session, setStep1Session] = useState<Step1Session | null>(null);
   const [step2CloneInfo, setStep2CloneInfo] = useState<Step2CloneInfo | null>(null);
+  const [step3WorkingDirInfo, setStep3WorkingDirInfo] = useState<Step3WorkingDirInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -68,6 +89,7 @@ export function App() {
     setErrorMessage(null);
     setStep1Session(null);
     setStep2CloneInfo(null);
+    setStep3WorkingDirInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
@@ -198,7 +220,6 @@ export function App() {
       addLog("info", `[Step 2/8] Sandbox Boundary: ${cloneData.sandbox_root}`);
       addLog("info", `[Step 2/8] Target Repository: ${cloneData.repo_dir}`);
       addLog("agent", `[Step 2/8] Step 2 Complete: Codebase safely contained in isolated Session Sandbox.`);
-      addLog("system", `[Info] Step 2 prototype complete. Ready for Step 3 (Set cloned directory as working directory).`);
 
       setStep2CloneInfo({
         sandboxRoot: cloneData.sandbox_root,
@@ -215,14 +236,80 @@ export function App() {
       setSteps((prev) =>
         prev.map((s, i) => (i === 1 ? { ...s, status: "completed" } : s))
       );
+
+      // ==========================================
+      // STEP 3: Set Working Directory inside Sandbox
+      // ==========================================
+      setCurrentStepIndex(2);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 2 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 3/8] Configuring execution context: Setting cloned repository as active working directory...`);
+      addLog("system", `[Step 3/8] Validating directory boundary inside sandbox & inspecting structure...`);
+
+      let dirRes = await fetch("/api/v1/set-working-dir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      }).catch(() => null);
+
+      if (!dirRes || !dirRes.ok) {
+        if (!dirRes || dirRes.status === 404 || dirRes.status === 502) {
+          const directDir = await fetch("http://localhost:8000/api/v1/set-working-dir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId }),
+          }).catch(() => null);
+          if (directDir) dirRes = directDir;
+        }
+      }
+
+      if (!dirRes) {
+        throw new Error("Unable to reach backend /api/v1/set-working-dir endpoint");
+      }
+
+      const dirData = await dirRes.json();
+
+      if (!dirRes.ok) {
+        const errDetail = dirData.detail || `Set working directory failed with status ${dirRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      const stacks = dirData.detected_frameworks && dirData.detected_frameworks.length > 0
+        ? dirData.detected_frameworks.join(", ")
+        : "Standard codebase";
+
+      addLog("info", `[Step 3/8] Working directory verified & locked: ${dirData.working_dir}`);
+      addLog("info", `[Step 3/8] Relative sandbox path: ./${dirData.relative_working_dir}`);
+      addLog("info", `[Step 3/8] Git worktree verified: ${dirData.is_git_worktree ? "Yes (.git active)" : "No"}`);
+      addLog("info", `[Step 3/8] Detected technology stack: ${stacks}`);
+      addLog("info", `[Step 3/8] Root directory entries: ${dirData.top_level_entries.slice(0, 8).join(", ")}${dirData.top_level_entries.length > 8 ? "..." : ""}`);
+      addLog("agent", `[Step 3/8] Step 3 Complete: Process execution context anchored to cloned repository.`);
+      addLog("system", `[Info] Step 3 prototype complete. Ready for Step 4 (Execute CLI AI agent from repository directory).`);
+
+      setStep3WorkingDirInfo({
+        workingDir: dirData.working_dir,
+        relativeWorkingDir: dirData.relative_working_dir,
+        repoName: dirData.repo_name,
+        isGitWorktree: dirData.is_git_worktree,
+        readmePresent: dirData.readme_present,
+        detectedFrameworks: dirData.detected_frameworks || [],
+        topLevelEntries: dirData.top_level_entries || [],
+      });
+
+      // Mark Step 3 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 2 ? { ...s, status: "completed" } : s))
+      );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "An error occurred during sandbox clone.";
-      addLog("warn", `[Step 2/8] Sandbox Clone Failed: ${msg}`);
+      const msg = err instanceof Error ? err.message : "An error occurred during sandbox execution.";
+      addLog("warn", `[Pipeline Failure] ${msg}`);
       setErrorMessage(msg);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 1 ? { ...s, status: "failed" } : s))
+        prev.map((s, i) => (s.status === "running" ? { ...s, status: "failed" } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -239,6 +326,7 @@ export function App() {
       addLog("system", `[Sandbox] Sandbox destroyed. All temporary files wiped completely from disk.`);
       setStep1Session(null);
       setStep2CloneInfo(null);
+      setStep3WorkingDirInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
       setReport(null);
@@ -246,6 +334,7 @@ export function App() {
       addLog("warn", `[Sandbox] Notice: Sandbox destroyed locally.`);
       setStep1Session(null);
       setStep2CloneInfo(null);
+      setStep3WorkingDirInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
     } finally {
@@ -264,6 +353,7 @@ export function App() {
       setReport(null);
       setStep1Session(null);
       setStep2CloneInfo(null);
+      setStep3WorkingDirInfo(null);
       setErrorMessage(null);
     }
   };
@@ -298,28 +388,29 @@ export function App() {
           </div>
         )}
 
-        {/* Step 1 & Step 2 Status Cards */}
+        {/* Step 1, Step 2 & Step 3 Status Cards */}
         {step1Session && (
           <div className="mx-auto max-w-5xl my-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* Step 1 Card */}
               <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
                 <div className="flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
                     <CheckCircle2 className="h-5 w-5" />
                   </div>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold uppercase tracking-wider text-accent">
-                        Step 1 Completed
+                        Step 1
                       </span>
-                      <span className="font-mono text-xs text-muted-foreground">
+                      <span className="font-mono text-[11px] text-muted-foreground truncate">
                         {step1Session.sessionId.slice(0, 8)}...
                       </span>
                     </div>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {step1Session.owner} / {step1Session.repoName}
+                    <h3 className="text-xs font-semibold text-foreground truncate mt-0.5" title={`${step1Session.owner}/${step1Session.repoName}`}>
+                      {step1Session.owner}/{step1Session.repoName}
                     </h3>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Verified Public Repo</p>
                   </div>
                 </div>
               </div>
@@ -335,17 +426,17 @@ export function App() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
                           <ShieldCheck className="h-3.5 w-3.5" />
-                          <span>Session Sandbox Active</span>
+                          <span>Step 2</span>
                         </span>
                         <span className="font-mono text-[11px] text-muted-foreground">
                           {step2CloneInfo.durationMs}ms
                         </span>
                       </div>
                       <p className="text-xs font-mono text-foreground truncate mt-1" title={step2CloneInfo.sandboxRoot}>
-                        {step2CloneInfo.sandboxRoot}
+                        Sandbox Cloned
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch} ({step2CloneInfo.commitHash})
+                        {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch}
                       </p>
                     </div>
                   </div>
@@ -353,7 +444,55 @@ export function App() {
               ) : (
                 <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
                   <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
-                  <span>Provisioning sandbox &amp; cloning repository...</span>
+                  <span>Cloning into sandbox...</span>
+                </div>
+              )}
+
+              {/* Step 3 Card: Active Working Directory */}
+              {step3WorkingDirInfo ? (
+                <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0 mt-0.5">
+                      <FolderGit2 className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
+                          <FolderCheck className="h-3.5 w-3.5" />
+                          <span>Step 3</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {step3WorkingDirInfo.isGitWorktree ? "Git Worktree" : "Local Dir"}
+                        </span>
+                      </div>
+                      <p className="text-xs font-mono text-foreground truncate mt-1" title={step3WorkingDirInfo.workingDir}>
+                        ./{step3WorkingDirInfo.relativeWorkingDir}
+                      </p>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {step3WorkingDirInfo.detectedFrameworks.length > 0 ? (
+                          step3WorkingDirInfo.detectedFrameworks.slice(0, 2).map((fw) => (
+                            <span
+                              key={fw}
+                              className="inline-flex items-center rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-accent/25"
+                            >
+                              {fw}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">Verified</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : step2CloneInfo ? (
+                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-accent/50 animate-pulse mr-2" />
+                  <span>Setting working dir...</span>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground/60">
+                  <span>Step 3 pending</span>
                 </div>
               )}
             </div>

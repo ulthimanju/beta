@@ -83,3 +83,30 @@ class SandboxStatsResponse(BaseModel):
     size_bytes: int
     created_at: str
     closed_at: Optional[str] = None
+
+
+class SetWorkingDirRequest(BaseModel):
+    """Schema for requesting to set the cloned repo as active working directory (Step 3)."""
+    session_id: str = Field(..., description="Unique session ID from Step 1")
+    target_subpath: Optional[str] = Field(
+        None,
+        description="Optional relative subpath inside the sandbox (defaults to cloned repo directory)",
+    )
+
+
+class SetWorkingDirResponse(BaseModel):
+    """Schema for response when working directory is validated and set."""
+    session_id: str
+    sandbox_root: str
+    working_dir: str
+    relative_working_dir: str
+    repo_name: str
+    is_git_worktree: bool
+    readme_present: bool
+    detected_frameworks: list[str]
+    top_level_entries: list[str]
+    step: int = 3
+    step_title: str = "Set Working Directory"
+    status: str = "configured"
+    message: str
+
