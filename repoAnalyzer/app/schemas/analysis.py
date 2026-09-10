@@ -1,5 +1,6 @@
 import re
 from datetime import datetime, timezone
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -44,18 +45,41 @@ class CloneRepoRequest(BaseModel):
 
 
 class CloneRepoResponse(BaseModel):
-    """Schema for response when repository is cloned in Step 2."""
+    """Schema for response when repository is cloned into the Session Sandbox."""
     session_id: str
     repo_url: str
     owner: str
     repo_name: str
-    temp_dir: str
+    sandbox_root: str
+    repo_dir: str
+    working_dir: str
     commit_hash: str
     branch: str
     file_count: int
     size_bytes: int
     duration_ms: float
     step: int = 2
-    step_title: str = "Clone Repository"
+    step_title: str = "Clone Repository into Sandbox"
     status: str = "cloned"
     message: str
+
+
+class SandboxCloseResponse(BaseModel):
+    """Schema for response when a session sandbox is destroyed and cleaned up."""
+    session_id: str
+    status: str
+    message: str
+    closed_at: str
+
+
+class SandboxStatsResponse(BaseModel):
+    """Schema for inspecting session sandbox state."""
+    session_id: str
+    status: str
+    root_dir: str
+    repo_dir: Optional[str]
+    working_dir: str
+    total_files: int
+    size_bytes: int
+    created_at: str
+    closed_at: Optional[str] = None

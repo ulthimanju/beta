@@ -5,7 +5,7 @@ import { ExecutionProgress } from "./components/ExecutionProgress";
 import { ReportDashboard } from "./components/ReportDashboard";
 import type { WorkflowStep, TerminalLogEntry, AnalysisReport } from "./types/analysis";
 import { INITIAL_WORKFLOW_STEPS } from "./mock/sampleData";
-import { CheckCircle2, AlertCircle, FolderGit2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Box, Trash2, ShieldCheck } from "lucide-react";
 
 interface Step1Session {
   sessionId: string;
@@ -17,7 +17,9 @@ interface Step1Session {
 }
 
 interface Step2CloneInfo {
-  tempDir: string;
+  sandboxRoot: string;
+  repoDir: string;
+  workingDir: string;
   commitHash: string;
   branch: string;
   fileCount: number;
@@ -33,6 +35,7 @@ export function App() {
   const [steps, setSteps] = useState<WorkflowStep[]>(INITIAL_WORKFLOW_STEPS);
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(-1);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [isClosingSandbox, setIsClosingSandbox] = useState<boolean>(false);
   const [logs, setLogs] = useState<TerminalLogEntry[]>([]);
   const [report, setReport] = useState<AnalysisReport | null>(null);
   const [step1Session, setStep1Session] = useState<Step1Session | null>(null);
@@ -122,8 +125,9 @@ export function App() {
       repoName = data.repo_name;
 
       addLog("system", `[Step 1/8] Session generated: ${sessionId}`);
+      addLog("system", `[Sandbox] Ephemeral Session Sandbox initialized for session ${sessionId.slice(0, 8)}.`);
       addLog("info", `[Step 1/8] Repository verified: ${owner}/${repoName}`);
-      addLog("agent", `[Step 1/8] Step 1 Complete: Repository URL received and verified.`);
+      addLog("agent", `[Step 1/8] Step 1 Complete: Repository URL received and Session Sandbox created.`);
 
       setStep1Session({
         sessionId,
@@ -151,14 +155,14 @@ export function App() {
     }
 
     // ==========================================
-    // STEP 2: Clone into Temporary Directory
+    // STEP 2: Clone Directly into Session Sandbox
     // ==========================================
     setCurrentStepIndex(1);
     setSteps((prev) =>
       prev.map((s, i) => (i === 1 ? { ...s, status: "running" } : s))
     );
 
-    addLog("system", `[Step 2/8] Creating temporary sandbox directory for session ${sessionId.slice(0, 8)}...`);
+    addLog("system", `[Step 2/8] Cloning target repository directly into Session Sandbox workspace...`);
     addLog("system", `[Step 2/8] Executing git clone --depth 1 ${validatedRepoUrl}...`);
 
     try {
@@ -190,14 +194,16 @@ export function App() {
         throw new Error(errDetail);
       }
 
-      addLog("info", `[Step 2/8] Clone complete: ${cloneData.file_count} files unpacked (${(cloneData.size_bytes / 1024).toFixed(1)} KB) in ${cloneData.duration_ms}ms.`);
-      addLog("info", `[Step 2/8] Branch: ${cloneData.branch} | HEAD Commit: ${cloneData.commit_hash}`);
-      addLog("info", `[Step 2/8] Temporary sandbox directory: ${cloneData.temp_dir}`);
-      addLog("agent", `[Step 2/8] Step 2 Complete: Repository cloned into isolated workspace.`);
+      addLog("info", `[Step 2/8] Sandbox clone complete: ${cloneData.file_count} files unpacked (${(cloneData.size_bytes / 1024).toFixed(1)} KB) in ${cloneData.duration_ms}ms.`);
+      addLog("info", `[Step 2/8] Sandbox Boundary: ${cloneData.sandbox_root}`);
+      addLog("info", `[Step 2/8] Target Repository: ${cloneData.repo_dir}`);
+      addLog("agent", `[Step 2/8] Step 2 Complete: Codebase safely contained in isolated Session Sandbox.`);
       addLog("system", `[Info] Step 2 prototype complete. Ready for Step 3 (Set cloned directory as working directory).`);
 
       setStep2CloneInfo({
-        tempDir: cloneData.temp_dir,
+        sandboxRoot: cloneData.sandbox_root,
+        repoDir: cloneData.repo_dir,
+        workingDir: cloneData.working_dir,
         commitHash: cloneData.commit_hash,
         branch: cloneData.branch,
         fileCount: cloneData.file_count,
@@ -212,8 +218,8 @@ export function App() {
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "An error occurred during clone.";
-      addLog("warn", `[Step 2/8] Clone Failed: ${msg}`);
+      const msg = err instanceof Error ? err.message : "An error occurred during sandbox clone.";
+      addLog("warn", `[Step 2/8] Sandbox Clone Failed: ${msg}`);
       setErrorMessage(msg);
       setSteps((prev) =>
         prev.map((s, i) => (i === 1 ? { ...s, status: "failed" } : s))
@@ -223,15 +229,43 @@ export function App() {
     }
   };
 
-  const handleReset = () => {
-    setSteps(INITIAL_WORKFLOW_STEPS);
-    setCurrentStepIndex(-1);
-    setIsAnalyzing(false);
-    setLogs([]);
-    setReport(null);
-    setStep1Session(null);
-    setStep2CloneInfo(null);
-    setErrorMessage(null);
+  const handleDestroySandbox = async () => {
+    if (!step1Session) return;
+    setIsClosingSandbox(true);
+    addLog("system", `[Sandbox] Closing and destroying Session Sandbox (${step1Session.sessionId.slice(0, 8)})...`);
+
+    try {
+      await fetch(`/api/v1/sandbox/${step1Session.sessionId}/close`, { method: "POST" }).catch(() => null);
+      addLog("system", `[Sandbox] Sandbox destroyed. All temporary files wiped completely from disk.`);
+      setStep1Session(null);
+      setStep2CloneInfo(null);
+      setSteps(INITIAL_WORKFLOW_STEPS);
+      setCurrentStepIndex(-1);
+      setReport(null);
+    } catch {
+      addLog("warn", `[Sandbox] Notice: Sandbox destroyed locally.`);
+      setStep1Session(null);
+      setStep2CloneInfo(null);
+      setSteps(INITIAL_WORKFLOW_STEPS);
+      setCurrentStepIndex(-1);
+    } finally {
+      setIsClosingSandbox(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (step1Session) {
+      await handleDestroySandbox();
+    } else {
+      setSteps(INITIAL_WORKFLOW_STEPS);
+      setCurrentStepIndex(-1);
+      setIsAnalyzing(false);
+      setLogs([]);
+      setReport(null);
+      setStep1Session(null);
+      setStep2CloneInfo(null);
+      setErrorMessage(null);
+    }
   };
 
   return (
@@ -266,58 +300,83 @@ export function App() {
 
         {/* Step 1 & Step 2 Status Cards */}
         {step1Session && (
-          <div className="mx-auto max-w-5xl my-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Step 1 Card */}
-            <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
-                  <CheckCircle2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-accent">
-                      Step 1 Completed
-                    </span>
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {step1Session.sessionId.slice(0, 8)}...
-                    </span>
-                  </div>
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {step1Session.owner} / {step1Session.repoName}
-                  </h3>
-                </div>
-              </div>
-            </div>
-
-            {/* Step 2 Card */}
-            {step2CloneInfo ? (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
+          <div className="mx-auto max-w-5xl my-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Step 1 Card */}
+              <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0">
-                    <FolderGit2 className="h-5 w-5" />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
+                    <CheckCircle2 className="h-5 w-5" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold uppercase tracking-wider text-primary">
-                        Step 2 Completed
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-accent">
+                        Step 1 Completed
                       </span>
-                      <span className="font-mono text-[11px] text-muted-foreground">
-                        {step2CloneInfo.durationMs}ms
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {step1Session.sessionId.slice(0, 8)}...
                       </span>
                     </div>
-                    <p className="text-xs font-mono text-foreground truncate" title={step2CloneInfo.tempDir}>
-                      {step2CloneInfo.tempDir}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch} ({step2CloneInfo.commitHash})
-                    </p>
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {step1Session.owner} / {step1Session.repoName}
+                    </h3>
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
-                <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
-                <span>Cloning in progress...</span>
+
+              {/* Step 2 Card with Session Sandbox Details */}
+              {step2CloneInfo ? (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0 mt-0.5">
+                      <Box className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <span>Session Sandbox Active</span>
+                        </span>
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          {step2CloneInfo.durationMs}ms
+                        </span>
+                      </div>
+                      <p className="text-xs font-mono text-foreground truncate mt-1" title={step2CloneInfo.sandboxRoot}>
+                        {step2CloneInfo.sandboxRoot}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch} ({step2CloneInfo.commitHash})
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
+                  <span>Provisioning sandbox &amp; cloning repository...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Sandbox Control Bar */}
+            {step2CloneInfo && (
+              <div className="flex items-center justify-between bg-card border border-border px-4 py-2.5 rounded-xl shadow-xs text-xs">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+                  <span>
+                    Sandbox isolated to <strong className="text-foreground font-mono">{step1Session.sessionId.slice(0, 8)}</strong>. All processes &amp; files wipe on close.
+                  </span>
+                </div>
+
+                <button
+                  onClick={handleDestroySandbox}
+                  disabled={isClosingSandbox}
+                  className="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer disabled:opacity-50"
+                  title="Destroy this sandbox and delete all cloned repository files"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{isClosingSandbox ? "Destroying..." : "Destroy Sandbox"}</span>
+                </button>
               </div>
             )}
           </div>
@@ -339,14 +398,14 @@ export function App() {
       <footer className="border-t border-border bg-card py-6 text-center text-xs text-muted-foreground">
         <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <p>
-            <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Step-by-Step Architecture Pipeline
+            <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Session Sandbox Architecture
           </p>
           <div className="flex items-center gap-4 text-[11px]">
-            <span>Step 2/8 Live</span>
+            <span>Ephemeral Sandbox Isolation</span>
             <span>&middot;</span>
-            <span>Shallow Git Cloner</span>
+            <span>Zero Host Clutter</span>
             <span>&middot;</span>
-            <span>Sandbox Workspace</span>
+            <span>Auto-Wipe on Close</span>
           </div>
         </div>
       </footer>

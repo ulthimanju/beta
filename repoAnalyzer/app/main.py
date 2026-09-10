@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     yield
     logger.info("Shutting down repoAnalyzer microservice")
+    from app.services.sandbox_manager import sandbox_manager
+    await sandbox_manager.close_all()
     await close_redis_client()
     await close_queue_connection()
 

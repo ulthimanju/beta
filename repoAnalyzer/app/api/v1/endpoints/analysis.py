@@ -9,8 +9,11 @@ from app.schemas.analysis import (
     RepoSubmitResponse,
     CloneRepoRequest,
     CloneRepoResponse,
+    SandboxCloseResponse,
+    SandboxStatsResponse,
 )
-from app.services.git_cloner import clone_repository, GitCloneError
+from app.services.git_cloner import clone_repository_into_sandbox, GitCloneError
+from app.services.sandbox_manager import sandbox_manager
 
 logger = get_logger("analysis_endpoint")
 router = APIRouter()
@@ -41,8 +44,8 @@ def check_github_repo_exists(repo_url: str) -> bool:
     response_model=RepoSubmitResponse,
     status_code=status.HTTP_200_OK,
     tags=["Analysis Pipeline"],
-    summary="Step 1: Receive and validate repository URL",
-    description="Validates the submitted repository URL, verifies public accessibility, and generates an analysis session.",
+    summary="Step 1: Receive repository URL and initialize Session Sandbox",
+    description="Validates repository URL, verifies accessibility, and creates an isolated session sandbox.",
 )
 async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
     """Execute Step 1 of the analysis pipeline."""
@@ -59,9 +62,13 @@ async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
 
     owner, repo_name = parts[0], parts[1]
 
+    # Initialize Session Sandbox
+    sandbox = sandbox_manager.get_or_create_sandbox(session_id)
+
     logger.info(
-        "Step 1: Repository URL received",
+        "Step 1: Repository URL received & Session Sandbox initialized",
         session_id=session_id,
+        sandbox_dir=sandbox.root_dir,
         repo_url=repo_url,
         owner=owner,
         repo_name=repo_name,
@@ -70,7 +77,8 @@ async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
     # Check remote repository existence
     exists = check_github_repo_exists(repo_url)
     if not exists:
-        logger.warning("Repository not found or private", repo_url=repo_url)
+        logger.warning("Repository not found or private; wiping sandbox", repo_url=repo_url)
+        await sandbox.close()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"GitHub repository '{owner}/{repo_name}' was not found. Please ensure it is public and correctly spelled.",
@@ -90,7 +98,7 @@ async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
         step=1,
         step_title="Receive Repository URL",
         status="received",
-        message=f"Step 1 Successful: Repository '{owner}/{repo_name}' received and verified.",
+        message=f"Step 1 Successful: Repository '{owner}/{repo_name}' verified. Session sandbox initialized.",
     )
 
 
@@ -99,8 +107,8 @@ async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
     response_model=CloneRepoResponse,
     status_code=status.HTTP_200_OK,
     tags=["Analysis Pipeline"],
-    summary="Step 2: Clone repository into temporary directory",
-    description="Clones the target repository into an isolated temporary directory via shallow clone.",
+    summary="Step 2: Clone repository into Session Sandbox",
+    description="Clones the target repository directly into the session's isolated sandbox workspace.",
 )
 async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoResponse:
     """Execute Step 2 of the analysis pipeline."""
@@ -112,38 +120,80 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
     owner = parts[0] if len(parts) > 0 else "unknown"
     repo_name = parts[1] if len(parts) > 1 else "unknown"
 
-    logger.info("Step 2: Cloning repository", session_id=session_id, repo_url=repo_url)
+    logger.info("Step 2: Cloning repository into Session Sandbox", session_id=session_id, repo_url=repo_url)
 
     try:
-        clone_result = await clone_repository(repo_url=repo_url, session_id=session_id)
+        clone_result = await clone_repository_into_sandbox(repo_url=repo_url, session_id=session_id)
     except GitCloneError as e:
-        logger.error("Step 2 failed during clone", session_id=session_id, error=str(e))
+        logger.error("Step 2 failed during sandbox clone", session_id=session_id, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Step 2 Clone Failure: {str(e)}",
+            detail=f"Step 2 Sandbox Clone Failure: {str(e)}",
         )
-
-    logger.info(
-        "Step 2 completed",
-        session_id=session_id,
-        temp_dir=clone_result["temp_dir"],
-        commit=clone_result["commit_hash"],
-        files=clone_result["file_count"],
-    )
 
     return CloneRepoResponse(
         session_id=session_id,
         repo_url=repo_url,
         owner=owner,
         repo_name=repo_name,
-        temp_dir=clone_result["temp_dir"],
+        sandbox_root=clone_result["sandbox_root"],
+        repo_dir=clone_result["repo_dir"],
+        working_dir=clone_result["working_dir"],
         commit_hash=clone_result["commit_hash"],
         branch=clone_result["branch"],
         file_count=clone_result["file_count"],
         size_bytes=clone_result["size_bytes"],
         duration_ms=clone_result["duration_ms"],
         step=2,
-        step_title="Clone Repository",
+        step_title="Clone Repository into Sandbox",
         status="cloned",
-        message=f"Step 2 Successful: Cloned into temporary directory '{clone_result['temp_dir']}' ({clone_result['file_count']} files, branch: {clone_result['branch']}, HEAD: {clone_result['commit_hash']}) in {clone_result['duration_ms']}ms.",
+        message=f"Step 2 Successful: Repository cloned directly into Session Sandbox '{clone_result['sandbox_root']}' ({clone_result['file_count']} files, branch: {clone_result['branch']}) in {clone_result['duration_ms']}ms.",
+    )
+
+
+@router.get(
+    "/sandbox/{session_id}",
+    response_model=SandboxStatsResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Session Sandbox"],
+    summary="Inspect Session Sandbox status",
+    description="Returns current storage, file count, and working directory of the active session sandbox.",
+)
+async def get_sandbox_stats(session_id: str) -> SandboxStatsResponse:
+    """Retrieve stats for an active session sandbox."""
+    sandbox = sandbox_manager.get_sandbox(session_id)
+    if not sandbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Sandbox for session '{session_id}' not found or already closed.",
+        )
+    stats = sandbox.get_stats()
+    return SandboxStatsResponse(**stats)
+
+
+@router.post(
+    "/sandbox/{session_id}/close",
+    response_model=SandboxCloseResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Session Sandbox"],
+    summary="Close and destroy Session Sandbox",
+    description="Terminates all active processes, deletes all cloned repository files, and wipes the sandbox from disk.",
+)
+async def close_sandbox_endpoint(session_id: str) -> SandboxCloseResponse:
+    """Explicitly destroy and wipe a session sandbox."""
+    result = await sandbox_manager.close_sandbox(session_id)
+    if not result:
+        return SandboxCloseResponse(
+            session_id=session_id,
+            status="closed",
+            message="Sandbox was already closed or does not exist.",
+            closed_at="",
+        )
+
+    logger.info("Session sandbox destroyed via API", session_id=session_id)
+    return SandboxCloseResponse(
+        session_id=result["session_id"],
+        status=result["status"],
+        message=result["message"],
+        closed_at=result["closed_at"],
     )
