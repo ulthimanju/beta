@@ -11,11 +11,15 @@ from app.schemas.analysis import (
     CloneRepoResponse,
     SetWorkingDirRequest,
     SetWorkingDirResponse,
+    InvokeAgentRequest,
+    InvokeAgentResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
 from app.services.git_cloner import clone_repository_into_sandbox, GitCloneError
 from app.services.sandbox_manager import sandbox_manager, SandboxError
+from app.services.agent_runner import agent_runner, AgentRunnerError
+
 
 
 logger = get_logger("analysis_endpoint")
@@ -199,6 +203,48 @@ async def set_working_directory_endpoint(payload: SetWorkingDirRequest) -> SetWo
         step_title="Set Working Directory",
         status="configured",
         message=f"Step 3 Successful: Active working directory locked to '{result['relative_working_dir']}' inside sandbox. Git worktree verified: {result['is_git_worktree']}. Detected stacks: {frameworks_str}.",
+    )
+
+
+@router.post(
+    "/invoke-agent",
+    response_model=InvokeAgentResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 4: Execute CLI AI Agent terminal invocation",
+    description="From the repository working directory within the Session Sandbox, executes the terminal command that invokes the CLI AI agent.",
+)
+async def invoke_agent_endpoint(payload: InvokeAgentRequest) -> InvokeAgentResponse:
+    """Execute Step 4 of the analysis pipeline."""
+    session_id = payload.session_id
+    logger.info("Step 4: Invoking CLI AI Agent from repo directory", session_id=session_id)
+
+    try:
+        result = await agent_runner.invoke_agent(
+            session_id=session_id,
+            custom_flags=payload.custom_flags,
+        )
+    except AgentRunnerError as e:
+        logger.error("Step 4 failed to invoke CLI AI agent", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Step 4 Failed: {str(e)}",
+        )
+
+    return InvokeAgentResponse(
+        session_id=session_id,
+        sandbox_root=result["sandbox_root"],
+        working_dir=result["working_dir"],
+        agent_executable=result["agent_executable"],
+        agent_version=result["agent_version"],
+        command=result["command"],
+        default_model=result["default_model"],
+        pid=result["pid"],
+        status="invoked",
+        step=4,
+        step_title="Execute CLI AI Agent",
+        duration_ms=result["duration_ms"],
+        message=f"Step 4 Successful: CLI AI agent ({result['agent_version']}) successfully invoked from '{result['working_dir']}'. Runtime initialized and ready for query dispatch (PID: {result['pid']}).",
     )
 
 

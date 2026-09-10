@@ -14,6 +14,8 @@ import {
   FolderGit2,
   FolderCheck,
   Layers,
+  Bot,
+  Cpu,
 } from "lucide-react";
 
 interface Step1Session {
@@ -46,6 +48,17 @@ interface Step3WorkingDirInfo {
   topLevelEntries: string[];
 }
 
+interface Step4AgentInfo {
+  agentExecutable: string;
+  agentVersion: string;
+  command: string;
+  defaultModel: string;
+  pid: number | null;
+  durationMs: number;
+  status: string;
+}
+
+
 
 export function App() {
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -61,6 +74,7 @@ export function App() {
   const [step1Session, setStep1Session] = useState<Step1Session | null>(null);
   const [step2CloneInfo, setStep2CloneInfo] = useState<Step2CloneInfo | null>(null);
   const [step3WorkingDirInfo, setStep3WorkingDirInfo] = useState<Step3WorkingDirInfo | null>(null);
+  const [step4AgentInfo, setStep4AgentInfo] = useState<Step4AgentInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -90,6 +104,7 @@ export function App() {
     setStep1Session(null);
     setStep2CloneInfo(null);
     setStep3WorkingDirInfo(null);
+    setStep4AgentInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
@@ -286,7 +301,6 @@ export function App() {
       addLog("info", `[Step 3/8] Detected technology stack: ${stacks}`);
       addLog("info", `[Step 3/8] Root directory entries: ${dirData.top_level_entries.slice(0, 8).join(", ")}${dirData.top_level_entries.length > 8 ? "..." : ""}`);
       addLog("agent", `[Step 3/8] Step 3 Complete: Process execution context anchored to cloned repository.`);
-      addLog("system", `[Info] Step 3 prototype complete. Ready for Step 4 (Execute CLI AI agent from repository directory).`);
 
       setStep3WorkingDirInfo({
         workingDir: dirData.working_dir,
@@ -301,6 +315,67 @@ export function App() {
       // Mark Step 3 completed
       setSteps((prev) =>
         prev.map((s, i) => (i === 2 ? { ...s, status: "completed" } : s))
+      );
+
+      // ==========================================
+      // STEP 4: Execute CLI AI Agent Terminal Invocation
+      // ==========================================
+      setCurrentStepIndex(3);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 3 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 4/8] Executing terminal command to invoke CLI AI agent from repository directory...`);
+      addLog("system", `[Step 4/8] Working Directory: ${dirData.working_dir}`);
+
+      let agentRes = await fetch("/api/v1/invoke-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      }).catch(() => null);
+
+      if (!agentRes || !agentRes.ok) {
+        if (!agentRes || agentRes.status === 404 || agentRes.status === 502) {
+          const directAgent = await fetch("http://localhost:8000/api/v1/invoke-agent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionId }),
+          }).catch(() => null);
+          if (directAgent) agentRes = directAgent;
+        }
+      }
+
+      if (!agentRes) {
+        throw new Error("Unable to reach backend /api/v1/invoke-agent endpoint");
+      }
+
+      const agentData = await agentRes.json();
+
+      if (!agentRes.ok) {
+        const errDetail = agentData.detail || `Agent invocation failed with status ${agentRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 4/8] Agent binary: ${agentData.agent_executable} (v${agentData.agent_version})`);
+      addLog("info", `[Step 4/8] Terminal command: ${agentData.command}`);
+      addLog("info", `[Step 4/8] Default model configured: ${agentData.default_model}`);
+      addLog("info", `[Step 4/8] Process active (PID: ${agentData.pid}) in ${agentData.duration_ms}ms.`);
+      addLog("agent", `[Step 4/8] Step 4 Complete: CLI AI agent runtime invoked and standing by for query dispatch.`);
+      addLog("system", `[Info] Step 4 prototype complete. Ready for Step 5 (Send query "analyze this repo using repo-analyzer skill").`);
+
+      setStep4AgentInfo({
+        agentExecutable: agentData.agent_executable,
+        agentVersion: agentData.agent_version,
+        command: agentData.command,
+        defaultModel: agentData.default_model,
+        pid: agentData.pid,
+        durationMs: agentData.duration_ms,
+        status: agentData.status,
+      });
+
+      // Mark Step 4 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 3 ? { ...s, status: "completed" } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -327,6 +402,7 @@ export function App() {
       setStep1Session(null);
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
+      setStep4AgentInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
       setReport(null);
@@ -335,6 +411,7 @@ export function App() {
       setStep1Session(null);
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
+      setStep4AgentInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
     } finally {
@@ -354,9 +431,11 @@ export function App() {
       setStep1Session(null);
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
+      setStep4AgentInfo(null);
       setErrorMessage(null);
     }
   };
+
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans transition-colors selection:bg-primary/20 selection:text-primary">
@@ -388,10 +467,10 @@ export function App() {
           </div>
         )}
 
-        {/* Step 1, Step 2 & Step 3 Status Cards */}
+        {/* Step 1, Step 2, Step 3 & Step 4 Status Cards */}
         {step1Session && (
           <div className="mx-auto max-w-5xl my-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Step 1 Card */}
               <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
                 <div className="flex items-center gap-3">
@@ -493,6 +572,48 @@ export function App() {
               ) : (
                 <div className="rounded-xl border border-border/50 bg-muted/20 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground/60">
                   <span>Step 3 pending</span>
+                </div>
+              )}
+
+              {/* Step 4 Card: CLI AI Agent Invoked */}
+              {step4AgentInfo ? (
+                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0 mt-0.5">
+                      <Bot className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <Cpu className="h-3.5 w-3.5" />
+                          <span>Step 4</span>
+                        </span>
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          PID: {step4AgentInfo.pid ?? "active"}
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-foreground truncate mt-1">
+                        CLI AI Agent Invoked
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="inline-flex items-center rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-mono font-medium text-primary border border-primary/25">
+                          agy v{step4AgentInfo.agentVersion}
+                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground truncate" title={step4AgentInfo.defaultModel}>
+                          {step4AgentInfo.defaultModel.split("-").slice(0, 2).join("-")}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : step3WorkingDirInfo ? (
+                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
+                  <span>Invoking CLI AI Agent...</span>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground/60">
+                  <span>Step 4 pending</span>
                 </div>
               )}
             </div>

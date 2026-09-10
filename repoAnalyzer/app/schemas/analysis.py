@@ -110,3 +110,30 @@ class SetWorkingDirResponse(BaseModel):
     status: str = "configured"
     message: str
 
+
+class InvokeAgentRequest(BaseModel):
+    """Schema for Step 4: Executing CLI AI agent terminal invocation from repo directory."""
+    session_id: str = Field(..., description="Unique session ID from previous steps")
+    custom_flags: Optional[list[str]] = Field(
+        None,
+        description="Optional custom terminal flags passed to the agent CLI invocation",
+    )
+
+
+class InvokeAgentResponse(BaseModel):
+    """Schema for response when CLI AI agent is invoked from repository directory."""
+    session_id: str
+    sandbox_root: str
+    working_dir: str
+    agent_executable: str
+    agent_version: str
+    command: str
+    default_model: str
+    pid: Optional[int]
+    status: str = "invoked"
+    step: int = 4
+    step_title: str = "Execute CLI AI Agent"
+    duration_ms: float
+    message: str
+
+
