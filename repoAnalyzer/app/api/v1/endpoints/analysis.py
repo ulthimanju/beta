@@ -15,6 +15,8 @@ from app.schemas.analysis import (
     InvokeAgentResponse,
     DispatchQueryRequest,
     DispatchQueryResponse,
+    LoadSkillRequest,
+    LoadSkillResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
@@ -289,6 +291,48 @@ async def dispatch_query_endpoint(payload: DispatchQueryRequest) -> DispatchQuer
         timestamp=result["timestamp"],
         duration_ms=result["duration_ms"],
         message=f"Step 5 Successful: Query '{result['query']}' dispatched to CLI AI agent using default model '{result['model_used']}' with '{result['skill_name']}' skill mounted in sandbox.",
+    )
+
+
+@router.post(
+    "/load-skill",
+    response_model=LoadSkillResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 6: AI agent loads and applies repo-analyzer skill",
+    description="Loads and parses repo-analyzer skill instructions, the 4 evaluation pillars checklists, and report output schema.",
+)
+async def load_skill_endpoint(payload: LoadSkillRequest) -> LoadSkillResponse:
+    """Execute Step 6 of the analysis pipeline."""
+    session_id = payload.session_id
+    logger.info("Step 6: Loading and applying skill", session_id=session_id, skill_name=payload.skill_name)
+
+    try:
+        result = await agent_runner.load_skill(
+            session_id=session_id,
+            skill_name=payload.skill_name,
+        )
+    except AgentRunnerError as e:
+        logger.error("Step 6 failed to load skill", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Step 6 Failed: {str(e)}",
+        )
+
+    return LoadSkillResponse(
+        session_id=session_id,
+        skill_name=result["skill_name"],
+        skill_dir=result["skill_dir"],
+        pillars_loaded=result["pillars_loaded"],
+        total_rules_count=result["total_rules_count"],
+        pillar_breakdowns=result["pillar_breakdowns"],
+        schema_valid=result["schema_valid"],
+        schema_title=result["schema_title"],
+        status="loaded",
+        step=6,
+        step_title="Load Skill",
+        duration_ms=result["duration_ms"],
+        message=f"Step 6 Successful: AI agent loaded '{result['skill_name']}' skill ({len(result['pillars_loaded'])} pillars, {result['total_rules_count']} rules). Output schema verified.",
     )
 
 

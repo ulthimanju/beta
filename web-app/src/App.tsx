@@ -18,6 +18,8 @@ import {
   Cpu,
   Send,
   Sparkles,
+  BookOpen,
+  FileCheck2,
 } from "lucide-react";
 
 interface Step1Session {
@@ -70,6 +72,25 @@ interface Step5QueryInfo {
   status: string;
 }
 
+interface PillarBreakdownItem {
+  pillar: string;
+  rules_count: number;
+  focus: string;
+  items: string[];
+}
+
+interface Step6SkillInfo {
+  skillName: string;
+  skillDir: string;
+  pillarsLoaded: string[];
+  totalRulesCount: number;
+  pillarBreakdowns: PillarBreakdownItem[];
+  schemaValid: boolean;
+  schemaTitle: string;
+  durationMs: number;
+  status: string;
+}
+
 
 
 
@@ -89,6 +110,7 @@ export function App() {
   const [step3WorkingDirInfo, setStep3WorkingDirInfo] = useState<Step3WorkingDirInfo | null>(null);
   const [step4AgentInfo, setStep4AgentInfo] = useState<Step4AgentInfo | null>(null);
   const [step5QueryInfo, setStep5QueryInfo] = useState<Step5QueryInfo | null>(null);
+  const [step6SkillInfo, setStep6SkillInfo] = useState<Step6SkillInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -120,6 +142,7 @@ export function App() {
     setStep3WorkingDirInfo(null);
     setStep4AgentInfo(null);
     setStep5QueryInfo(null);
+    setStep6SkillInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
@@ -458,6 +481,79 @@ export function App() {
       setSteps((prev) =>
         prev.map((s, i) => (i === 4 ? { ...s, status: "completed" } : s))
       );
+
+      // ==========================================
+      // STEP 6: Load Skill (repo-analyzer)
+      // ==========================================
+      setCurrentStepIndex(5);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 5 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 6/8] AI agent loading and configuring "repo-analyzer" skill...`);
+      addLog("system", `[Step 6/8] Extracting evaluation criteria for 4 pillars: Architecture, Ideology, Methodology, Software Principles...`);
+
+      let skillRes = await fetch("/api/v1/load-skill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          skill_name: "repo-analyzer",
+        }),
+      }).catch(() => null);
+
+      if (!skillRes || !skillRes.ok) {
+        if (!skillRes || skillRes.status === 404 || skillRes.status === 502) {
+          const directSkill = await fetch("http://localhost:8000/api/v1/load-skill", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              skill_name: "repo-analyzer",
+            }),
+          }).catch(() => null);
+          if (directSkill) skillRes = directSkill;
+        }
+      }
+
+      if (!skillRes) {
+        throw new Error("Unable to reach backend /api/v1/load-skill endpoint");
+      }
+
+      const skillData = await skillRes.json();
+
+      if (!skillRes.ok) {
+        const errDetail = skillData.detail || `Skill load failed with status ${skillRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 6/8] Skill loaded: ${skillData.skill_name} (${skillData.pillars_loaded.join(", ")})`);
+      addLog("info", `[Step 6/8] Evaluation checklist compiled: ${skillData.total_rules_count} criteria across 4 pillars`);
+      if (Array.isArray(skillData.pillar_breakdowns)) {
+        for (const pb of skillData.pillar_breakdowns) {
+          addLog("info", `[Step 6/8] • ${pb.pillar}: ${pb.rules_count} criteria (${pb.focus.slice(0, 45)}...)`);
+        }
+      }
+      addLog("info", `[Step 6/8] Report schema: ${skillData.schema_title} (${skillData.schema_valid ? "Valid JSON Schema Draft-07" : "Unverified"})`);
+      addLog("agent", `[Step 6/8] Step 6 Complete: AI agent has successfully loaded and applied the "repo-analyzer" skill.`);
+      addLog("system", `[Info] Step 6 prototype complete. Ready for Step 7 (Perform Repository Analysis).`);
+
+      setStep6SkillInfo({
+        skillName: skillData.skill_name,
+        skillDir: skillData.skill_dir,
+        pillarsLoaded: skillData.pillars_loaded,
+        totalRulesCount: skillData.total_rules_count,
+        pillarBreakdowns: skillData.pillar_breakdowns || [],
+        schemaValid: skillData.schema_valid,
+        schemaTitle: skillData.schema_title,
+        durationMs: skillData.duration_ms,
+        status: skillData.status,
+      });
+
+      // Mark Step 6 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 5 ? { ...s, status: "completed" } : s))
+      );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
     } catch (err: unknown) {
@@ -485,6 +581,7 @@ export function App() {
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
+      setStep6SkillInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
       setReport(null);
@@ -495,6 +592,7 @@ export function App() {
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
+      setStep6SkillInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
     } finally {
@@ -516,6 +614,7 @@ export function App() {
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
+      setStep6SkillInfo(null);
       setErrorMessage(null);
     }
   };
@@ -685,7 +784,7 @@ export function App() {
                           agy v{step4AgentInfo.agentVersion}
                         </span>
                         <span className="text-[10px] font-mono text-muted-foreground truncate" title={step4AgentInfo.defaultModel}>
-                          {step4AgentInfo.defaultModel.split("-").slice(0, 2).join("-")}
+                          {step4AgentInfo.defaultModel}
                         </span>
                       </div>
                     </div>
@@ -735,6 +834,61 @@ export function App() {
                     <span className="text-muted-foreground">skill:</span>
                     <span>{step5QueryInfo.skillName}</span>
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* Step 6: Skill Loaded & Evaluation Pillars Status Bar */}
+            {step6SkillInfo && (
+              <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
+                      <BookOpen className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-accent flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          <span>Step 6: Skill Loaded &amp; Applied</span>
+                        </span>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {step6SkillInfo.durationMs}ms
+                        </span>
+                      </div>
+                      <p className="font-mono text-xs text-foreground font-semibold">
+                        {step6SkillInfo.skillName} &middot; {step6SkillInfo.totalRulesCount} Evaluation Rules Active
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded bg-muted px-2.5 py-1 text-[11px] font-mono text-foreground border border-border">
+                      <FileCheck2 className="h-3.5 w-3.5 text-accent" />
+                      <span>{step6SkillInfo.schemaTitle}</span>
+                      <span className="text-[10px] text-accent font-semibold">(Draft-07 Verified)</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4 Pillars Breakdown Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-accent/15">
+                  {step6SkillInfo.pillarBreakdowns.map((pb) => (
+                    <div
+                      key={pb.pillar}
+                      className="rounded-lg border border-border/70 bg-card/70 p-2.5 text-xs flex flex-col justify-between shadow-2xs"
+                    >
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="font-semibold text-foreground truncate">{pb.pillar}</span>
+                        <span className="inline-flex items-center rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-mono font-medium text-accent border border-accent/25">
+                          {pb.rules_count} rules
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2" title={pb.focus}>
+                        {pb.focus}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

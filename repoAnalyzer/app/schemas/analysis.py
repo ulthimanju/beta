@@ -146,7 +146,7 @@ class DispatchQueryRequest(BaseModel):
     )
     model: Optional[str] = Field(
         None,
-        description="Optional model override (defaults to agent's default model: gemini-3.8-flash-high)",
+        description="Optional model override (defaults to agent's default model: gemini-3.8-flash-medium)",
     )
 
 
@@ -161,6 +161,40 @@ class DispatchQueryResponse(BaseModel):
     step: int = 5
     step_title: str = "Dispatch Query"
     timestamp: str
+    duration_ms: float
+    message: str
+
+
+class PillarRuleInfo(BaseModel):
+    """Information regarding an individual evaluation pillar loaded from the skill."""
+    pillar: str = Field(..., description="Pillar name (e.g. Architecture, Ideology)")
+    rules_count: int = Field(..., description="Number of evaluation checklist rules")
+    focus: str = Field(..., description="Core focus areas evaluated")
+    items: list[str] = Field(default_factory=list, description="List of checklist rule statements")
+
+
+class LoadSkillRequest(BaseModel):
+    """Schema for Step 6: AI agent loads and applies the repo-analyzer skill."""
+    session_id: str = Field(..., description="Unique session ID from previous steps")
+    skill_name: str = Field(
+        default="repo-analyzer",
+        description="Name of the skill to load and apply",
+    )
+
+
+class LoadSkillResponse(BaseModel):
+    """Schema for response when AI agent loads and applies the repo-analyzer skill."""
+    session_id: str
+    skill_name: str
+    skill_dir: str
+    pillars_loaded: list[str]
+    total_rules_count: int
+    pillar_breakdowns: list[PillarRuleInfo]
+    schema_valid: bool
+    schema_title: str
+    status: str = "loaded"
+    step: int = 6
+    step_title: str = "Load Skill"
     duration_ms: float
     message: str
 

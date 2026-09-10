@@ -73,6 +73,18 @@ class SessionSandbox:
                     logger.info("Mounted skill into sandbox", skill=skill_name, target=target_skill_dir)
                 except Exception as e:
                     logger.warning("Failed to copy skill to sandbox", error=str(e))
+
+            # Also mount into repo working directory if cloned
+            if self.repo_dir and os.path.exists(self.repo_dir):
+                repo_skills_dir = os.path.join(self.repo_dir, ".agents", "skills")
+                os.makedirs(repo_skills_dir, exist_ok=True)
+                repo_skill_target = os.path.join(repo_skills_dir, skill_name)
+                if not os.path.exists(repo_skill_target):
+                    try:
+                        shutil.copytree(src, repo_skill_target, dirs_exist_ok=True)
+                    except Exception:
+                        pass
+
             return target_skill_dir
         return None
 

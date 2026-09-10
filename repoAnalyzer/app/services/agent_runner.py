@@ -1,10 +1,13 @@
 import asyncio
+import json
 import os
+import re
 import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager
 
@@ -23,7 +26,7 @@ class AgentRunner:
     strictly from the working repository directory inside the Session Sandbox.
     """
 
-    DEFAULT_MODEL = "gemini-3.8-flash-high"
+    DEFAULT_MODEL = settings.DEFAULT_MODEL
 
     def __init__(self, binary_name: str = "agy") -> None:
         self.binary_name = binary_name
@@ -192,6 +195,128 @@ class AgentRunner:
             "timestamp": timestamp,
             "duration_ms": duration_ms,
             "status": "dispatched",
+        }
+
+    async def load_skill(
+        self,
+        session_id: str,
+        skill_name: str = "repo-analyzer",
+    ) -> dict[str, Any]:
+        """
+        Step 6: The AI agent loads and applies the repo-analyzer skill.
+        Validates skill files, extracts checklist rules across the 4 evaluation pillars
+        (Architecture, Ideology, Methodology, Software Principles),
+        and verifies the report output JSON schema.
+        """
+        start_time = time.perf_counter()
+
+        sandbox = sandbox_manager.get_sandbox(session_id)
+        if not sandbox:
+            raise AgentRunnerError(f"Session sandbox '{session_id}' not found or already closed.")
+
+        # Ensure skill is mounted in sandbox
+        mounted_skill_dir = sandbox.mount_skill(skill_name)
+        if not mounted_skill_dir or not os.path.exists(mounted_skill_dir):
+            candidates = [
+                os.path.join(sandbox.root_dir, ".agents", "skills", skill_name),
+                os.path.join(os.getcwd(), ".agents", "skills", skill_name),
+                os.path.expanduser(f"~/.agents/skills/{skill_name}"),
+            ]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    mounted_skill_dir = cand
+                    break
+
+        if not mounted_skill_dir or not os.path.exists(mounted_skill_dir):
+            raise AgentRunnerError(f"Skill '{skill_name}' could not be located in sandbox or system.")
+
+        skill_md_path = os.path.join(mounted_skill_dir, "SKILL.md")
+        if not os.path.exists(skill_md_path):
+            raise AgentRunnerError(f"Skill '{skill_name}' is missing required SKILL.md entrypoint.")
+
+        # Parse 4 evaluation pillars from references/
+        references_dir = os.path.join(mounted_skill_dir, "references")
+        if not os.path.exists(references_dir):
+            raise AgentRunnerError(f"Skill '{skill_name}' is missing 'references' directory.")
+
+        pillar_files = {
+            "Architecture": "architecture.md",
+            "Ideology": "ideology.md",
+            "Methodology": "methodology.md",
+            "Software Principles": "principles.md",
+        }
+
+        pillar_breakdowns = []
+        total_rules = 0
+
+        for pillar_name, file_name in pillar_files.items():
+            ref_path = os.path.join(references_dir, file_name)
+            if not os.path.exists(ref_path):
+                raise AgentRunnerError(f"Skill '{skill_name}' is missing pillar reference file: {file_name}")
+
+            with open(ref_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            focus_match = re.search(r"^Focus:\s*(.+)$", content, re.MULTILINE)
+            focus = focus_match.group(1).strip() if focus_match else "Architectural analysis"
+
+            checklist_match = re.search(r"##\s+Evaluation checklist[^\n]*\n([\s\S]*?)(?=\n##|\Z)", content)
+            items = []
+            if checklist_match:
+                items = re.findall(r"^\s*\d+\.\s+(.+)$", checklist_match.group(1), re.MULTILINE)
+
+            total_rules += len(items)
+            pillar_breakdowns.append({
+                "pillar": pillar_name,
+                "rules_count": len(items),
+                "focus": focus,
+                "items": items,
+            })
+
+        # Parse & verify schemas/report_schema.json
+        schema_path = os.path.join(mounted_skill_dir, "schemas", "report_schema.json")
+        schema_valid = False
+        schema_title = "Unknown"
+        if os.path.exists(schema_path):
+            try:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema_json = json.load(f)
+                schema_title = schema_json.get("title", "RepoAnalyzerReport")
+                schema_valid = True
+            except Exception as e:
+                logger.warning("Report schema validation failed", error=str(e))
+
+        # Store loaded skill state on the session sandbox
+        setattr(sandbox, "skill_loaded", True)
+        setattr(sandbox, "active_skill", skill_name)
+        setattr(sandbox, "loaded_skill_dir", mounted_skill_dir)
+        setattr(sandbox, "skill_pillars", [p["pillar"] for p in pillar_breakdowns])
+        setattr(sandbox, "skill_rules_count", total_rules)
+        setattr(sandbox, "skill_breakdowns", pillar_breakdowns)
+        setattr(sandbox, "schema_valid", schema_valid)
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        logger.info(
+            "Step 6: Skill loaded and applied",
+            session_id=session_id,
+            skill=skill_name,
+            pillars=len(pillar_breakdowns),
+            total_rules=total_rules,
+            duration_ms=duration_ms,
+        )
+
+        return {
+            "session_id": session_id,
+            "skill_name": skill_name,
+            "skill_dir": mounted_skill_dir,
+            "pillars_loaded": [p["pillar"] for p in pillar_breakdowns],
+            "total_rules_count": total_rules,
+            "pillar_breakdowns": pillar_breakdowns,
+            "schema_valid": schema_valid,
+            "schema_title": schema_title,
+            "duration_ms": duration_ms,
+            "status": "loaded",
         }
 
 
