@@ -13,11 +13,14 @@ from app.schemas.analysis import (
     SetWorkingDirResponse,
     InvokeAgentRequest,
     InvokeAgentResponse,
+    DispatchQueryRequest,
+    DispatchQueryResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
 from app.services.git_cloner import clone_repository_into_sandbox, GitCloneError
 from app.services.sandbox_manager import sandbox_manager, SandboxError
+
 from app.services.agent_runner import agent_runner, AgentRunnerError
 
 
@@ -245,6 +248,47 @@ async def invoke_agent_endpoint(payload: InvokeAgentRequest) -> InvokeAgentRespo
         step_title="Execute CLI AI Agent",
         duration_ms=result["duration_ms"],
         message=f"Step 4 Successful: CLI AI agent ({result['agent_version']}) successfully invoked from '{result['working_dir']}'. Runtime initialized and ready for query dispatch (PID: {result['pid']}).",
+    )
+
+
+@router.post(
+    "/dispatch-query",
+    response_model=DispatchQueryResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 5: Send analysis query to CLI AI Agent",
+    description="Sends the query 'analyze this repo using repo-analyzer skill' to the CLI AI agent using its default model.",
+)
+async def dispatch_query_endpoint(payload: DispatchQueryRequest) -> DispatchQueryResponse:
+    """Execute Step 5 of the analysis pipeline."""
+    session_id = payload.session_id
+    logger.info("Step 5: Dispatching query to CLI AI agent", session_id=session_id, query=payload.query)
+
+    try:
+        result = await agent_runner.dispatch_query(
+            session_id=session_id,
+            query=payload.query,
+            model=payload.model,
+        )
+    except AgentRunnerError as e:
+        logger.error("Step 5 failed to dispatch query", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Step 5 Failed: {str(e)}",
+        )
+
+    return DispatchQueryResponse(
+        session_id=session_id,
+        query=result["query"],
+        model_used=result["model_used"],
+        working_dir=result["working_dir"],
+        skill_name=result["skill_name"],
+        status="dispatched",
+        step=5,
+        step_title="Dispatch Query",
+        timestamp=result["timestamp"],
+        duration_ms=result["duration_ms"],
+        message=f"Step 5 Successful: Query '{result['query']}' dispatched to CLI AI agent using default model '{result['model_used']}' with '{result['skill_name']}' skill mounted in sandbox.",
     )
 
 

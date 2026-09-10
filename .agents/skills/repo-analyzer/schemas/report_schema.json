@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RepoAnalyzerReport",
+  "type": "object",
+  "required": ["executiveSummary", "metadata", "pillars", "rawMarkdown"],
+  "properties": {
+    "executiveSummary": {
+      "type": "string",
+      "description": "2-3 paragraph high-level architectural appraisal."
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["overallScore", "grade", "primaryArchitecturePattern", "primaryLanguage"],
+      "properties": {
+        "overallScore": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "grade": {
+          "type": "string",
+          "enum": ["A+", "A", "B", "C", "D", "F"]
+        },
+        "primaryArchitecturePattern": {
+          "type": "string",
+          "description": "e.g. 'Modular Monolith', 'Hexagonal', 'Layered / N-tier', 'No discernible pattern'"
+        },
+        "primaryLanguage": {
+          "type": "string"
+        },
+        "secondaryLanguages": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "pillars": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["title", "score", "status", "summary", "keyStrengths", "antiPatterns", "checklist"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "enum": ["Architecture", "Ideology", "Methodology", "Software Principles"]
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "status": {
+            "type": "string",
+            "enum": ["exceptional", "good", "needs-attention", "critical"]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "keyStrengths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "antiPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "checklist": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["label", "passed", "note"],
+              "properties": {
+                "label": { "type": "string" },
+                "passed": { "type": "boolean" },
+                "note": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "rawMarkdown": {
+      "type": "string",
+      "description": "Full human-readable audit report, verbatim, for export/pasting elsewhere."
+    }
+  }
+}

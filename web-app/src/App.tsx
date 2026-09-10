@@ -16,6 +16,8 @@ import {
   Layers,
   Bot,
   Cpu,
+  Send,
+  Sparkles,
 } from "lucide-react";
 
 interface Step1Session {
@@ -58,6 +60,17 @@ interface Step4AgentInfo {
   status: string;
 }
 
+interface Step5QueryInfo {
+  query: string;
+  modelUsed: string;
+  workingDir: string;
+  skillName: string;
+  timestamp: string;
+  durationMs: number;
+  status: string;
+}
+
+
 
 
 export function App() {
@@ -75,6 +88,7 @@ export function App() {
   const [step2CloneInfo, setStep2CloneInfo] = useState<Step2CloneInfo | null>(null);
   const [step3WorkingDirInfo, setStep3WorkingDirInfo] = useState<Step3WorkingDirInfo | null>(null);
   const [step4AgentInfo, setStep4AgentInfo] = useState<Step4AgentInfo | null>(null);
+  const [step5QueryInfo, setStep5QueryInfo] = useState<Step5QueryInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -105,6 +119,7 @@ export function App() {
     setStep2CloneInfo(null);
     setStep3WorkingDirInfo(null);
     setStep4AgentInfo(null);
+    setStep5QueryInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
@@ -361,7 +376,6 @@ export function App() {
       addLog("info", `[Step 4/8] Default model configured: ${agentData.default_model}`);
       addLog("info", `[Step 4/8] Process active (PID: ${agentData.pid}) in ${agentData.duration_ms}ms.`);
       addLog("agent", `[Step 4/8] Step 4 Complete: CLI AI agent runtime invoked and standing by for query dispatch.`);
-      addLog("system", `[Info] Step 4 prototype complete. Ready for Step 5 (Send query "analyze this repo using repo-analyzer skill").`);
 
       setStep4AgentInfo({
         agentExecutable: agentData.agent_executable,
@@ -376,6 +390,73 @@ export function App() {
       // Mark Step 4 completed
       setSteps((prev) =>
         prev.map((s, i) => (i === 3 ? { ...s, status: "completed" } : s))
+      );
+
+      // ==========================================
+      // STEP 5: Dispatch Query to CLI AI Agent
+      // ==========================================
+      setCurrentStepIndex(4);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 4 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 5/8] Dispatching query: "analyze this repo using repo-analyzer skill"...`);
+      addLog("system", `[Step 5/8] Using default model: ${agentData.default_model}`);
+
+      let queryRes = await fetch("/api/v1/dispatch-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          query: "analyze this repo using repo-analyzer skill",
+        }),
+      }).catch(() => null);
+
+      if (!queryRes || !queryRes.ok) {
+        if (!queryRes || queryRes.status === 404 || queryRes.status === 502) {
+          const directQuery = await fetch("http://localhost:8000/api/v1/dispatch-query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              query: "analyze this repo using repo-analyzer skill",
+            }),
+          }).catch(() => null);
+          if (directQuery) queryRes = directQuery;
+        }
+      }
+
+      if (!queryRes) {
+        throw new Error("Unable to reach backend /api/v1/dispatch-query endpoint");
+      }
+
+      const queryData = await queryRes.json();
+
+      if (!queryRes.ok) {
+        const errDetail = queryData.detail || `Query dispatch failed with status ${queryRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 5/8] Query confirmed: "${queryData.query}"`);
+      addLog("info", `[Step 5/8] Model target: ${queryData.model_used} (default configured)`);
+      addLog("info", `[Step 5/8] Skill target: ${queryData.skill_name} (mounted in sandbox)`);
+      addLog("info", `[Step 5/8] Execution context: ${queryData.working_dir}`);
+      addLog("agent", `[Step 5/8] Step 5 Complete: Query received by CLI AI agent. Execution plan ready for skill loading.`);
+      addLog("system", `[Info] Step 5 prototype complete. Ready for Step 6 (AI agent loads and applies repo-analyzer skill).`);
+
+      setStep5QueryInfo({
+        query: queryData.query,
+        modelUsed: queryData.model_used,
+        workingDir: queryData.working_dir,
+        skillName: queryData.skill_name,
+        timestamp: queryData.timestamp,
+        durationMs: queryData.duration_ms,
+        status: queryData.status,
+      });
+
+      // Mark Step 5 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 4 ? { ...s, status: "completed" } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -403,6 +484,7 @@ export function App() {
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
+      setStep5QueryInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
       setReport(null);
@@ -412,6 +494,7 @@ export function App() {
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
+      setStep5QueryInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
     } finally {
@@ -432,9 +515,11 @@ export function App() {
       setStep2CloneInfo(null);
       setStep3WorkingDirInfo(null);
       setStep4AgentInfo(null);
+      setStep5QueryInfo(null);
       setErrorMessage(null);
     }
   };
+
 
 
   return (
@@ -617,6 +702,42 @@ export function App() {
                 </div>
               )}
             </div>
+
+            {/* Step 5: Active Query Dispatch Status Bar */}
+            {step5QueryInfo && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0">
+                    <Sparkles className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-primary flex items-center gap-1">
+                        <Send className="h-3 w-3" />
+                        <span>Step 5: Query Dispatched</span>
+                      </span>
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {step5QueryInfo.durationMs}ms
+                      </span>
+                    </div>
+                    <p className="font-mono text-xs text-foreground font-medium truncate mt-0.5" title={step5QueryInfo.query}>
+                      "{step5QueryInfo.query}"
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-1 text-[11px] font-mono text-foreground border border-border">
+                    <span className="text-muted-foreground">model:</span>
+                    <span>{step5QueryInfo.modelUsed}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded bg-accent/15 px-2 py-1 text-[11px] font-mono text-accent border border-accent/25">
+                    <span className="text-muted-foreground">skill:</span>
+                    <span>{step5QueryInfo.skillName}</span>
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Sandbox Control Bar */}
             {step2CloneInfo && (

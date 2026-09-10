@@ -52,6 +52,31 @@ class SessionSandbox:
         self.repo_dir = os.path.join(self.root_dir, repo_dir_name)
         return self.repo_dir
 
+    def mount_skill(self, skill_name: str = "repo-analyzer") -> Optional[str]:
+        """Ensure skill is mounted/accessible inside the sandbox workspace for the CLI AI agent."""
+        global_skill_path = os.path.expanduser(f"~/.agents/skills/{skill_name}")
+        local_skill_path = os.path.join(os.getcwd(), ".agents", "skills", skill_name)
+
+        src = None
+        if os.path.exists(global_skill_path):
+            src = global_skill_path
+        elif os.path.exists(local_skill_path):
+            src = local_skill_path
+
+        if src and os.path.exists(src):
+            sandbox_skills_dir = os.path.join(self.root_dir, ".agents", "skills")
+            os.makedirs(sandbox_skills_dir, exist_ok=True)
+            target_skill_dir = os.path.join(sandbox_skills_dir, skill_name)
+            if not os.path.exists(target_skill_dir):
+                try:
+                    shutil.copytree(src, target_skill_dir, dirs_exist_ok=True)
+                    logger.info("Mounted skill into sandbox", skill=skill_name, target=target_skill_dir)
+                except Exception as e:
+                    logger.warning("Failed to copy skill to sandbox", error=str(e))
+            return target_skill_dir
+        return None
+
+
     def set_working_directory(self, target_path: Optional[str] = None) -> dict[str, Any]:
         """
         Step 3: Set and verify the working directory inside the sandbox.

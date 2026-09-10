@@ -137,3 +137,32 @@ class InvokeAgentResponse(BaseModel):
     message: str
 
 
+class DispatchQueryRequest(BaseModel):
+    """Schema for Step 5: Dispatching analysis query to the CLI AI agent."""
+    session_id: str = Field(..., description="Unique session ID from previous steps")
+    query: str = Field(
+        default="analyze this repo using repo-analyzer skill",
+        description="Query sent to the AI agent using its default model",
+    )
+    model: Optional[str] = Field(
+        None,
+        description="Optional model override (defaults to agent's default model: gemini-3.8-flash-high)",
+    )
+
+
+class DispatchQueryResponse(BaseModel):
+    """Schema for response when analysis query is dispatched to the CLI AI agent."""
+    session_id: str
+    query: str
+    model_used: str
+    working_dir: str
+    skill_name: str
+    status: str = "dispatched"
+    step: int = 5
+    step_title: str = "Dispatch Query"
+    timestamp: str
+    duration_ms: float
+    message: str
+
+
+

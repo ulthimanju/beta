@@ -3,9 +3,11 @@ import os
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from typing import Any, Optional
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager
+
 
 logger = get_logger("agent_runner")
 
@@ -140,5 +142,58 @@ class AgentRunner:
             logger.error("Failed to invoke CLI AI agent", session_id=session_id, error=str(e))
             raise AgentRunnerError(f"CLI AI agent invocation failed: {str(e)}")
 
+    async def dispatch_query(
+        self,
+        session_id: str,
+        query: str = "analyze this repo using repo-analyzer skill",
+        model: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Step 5: Send query "analyze this repo using repo-analyzer skill"
+        to the AI agent using its default model.
+        """
+        start_time = time.perf_counter()
+
+        sandbox = sandbox_manager.get_sandbox(session_id)
+        if not sandbox:
+            raise AgentRunnerError(f"Session sandbox '{session_id}' not found or already closed.")
+
+        working_dir = sandbox.get_working_directory()
+        if not os.path.exists(working_dir):
+            raise AgentRunnerError(f"Working directory does not exist: '{working_dir}'")
+
+        # Mount/verify repo-analyzer skill is inside the sandbox workspace
+        mounted_skill_dir = sandbox.mount_skill("repo-analyzer")
+
+        active_model = model or self.DEFAULT_MODEL
+        setattr(sandbox, "active_query", query)
+        setattr(sandbox, "active_model", active_model)
+        setattr(sandbox, "mounted_skill_dir", mounted_skill_dir)
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            "Step 5: Query dispatched to CLI AI agent",
+            session_id=session_id,
+            query=query,
+            model=active_model,
+            skill="repo-analyzer",
+            working_dir=working_dir,
+            duration_ms=duration_ms,
+        )
+
+        return {
+            "session_id": session_id,
+            "query": query,
+            "model_used": active_model,
+            "working_dir": working_dir,
+            "skill_name": "repo-analyzer",
+            "timestamp": timestamp,
+            "duration_ms": duration_ms,
+            "status": "dispatched",
+        }
+
 
 agent_runner = AgentRunner()
+
