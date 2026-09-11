@@ -252,8 +252,9 @@ async def invoke_agent_endpoint(payload: InvokeAgentRequest) -> InvokeAgentRespo
         )
     except AgentRunnerError as e:
         logger.error("Step 4 failed to invoke CLI AI agent", session_id=session_id, error=str(e))
+        is_security = "Security violation" in str(e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST if is_security else status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Step 4 Failed: {str(e)}",
         )
 

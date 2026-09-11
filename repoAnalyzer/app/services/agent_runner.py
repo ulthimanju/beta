@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager, validate_skill_name_security, SandboxError
 from app.services.report_generator import report_generator
+from app.schemas.analysis import validate_safe_custom_flags
 
 
 logger = get_logger("agent_runner")
@@ -83,11 +84,19 @@ class AgentRunner:
         binary_path = self.resolve_binary()
         version = self.get_agent_version(binary_path)
 
+        # Strictly validate custom_flags against security allowlist
+        try:
+            safe_flags = validate_safe_custom_flags(custom_flags)
+        except ValueError as e:
+            raise AgentRunnerError(str(e))
+
         cmd = [binary_path]
-        if custom_flags:
-            cmd.extend(custom_flags)
-        else:
-            cmd.extend(["--dangerously-skip-permissions"])
+        if not safe_flags or "--dangerously-skip-permissions" not in safe_flags:
+            cmd.append("--dangerously-skip-permissions")
+        if safe_flags:
+            for flag in safe_flags:
+                if flag not in cmd:
+                    cmd.append(flag)
 
         cmd_str = " ".join(cmd)
 

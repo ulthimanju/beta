@@ -38,6 +38,78 @@ def validate_github_repo_url(v: str) -> str:
     return clean_url
 
 
+ALLOWED_AGENT_FLAGS = {
+    "--dangerously-skip-permissions",
+}
+ALLOWED_AGENT_VALUED_FLAGS = {
+    "--model": re.compile(r"^[a-zA-Z0-9._-]{1,64}$"),
+    "--effort": re.compile(r"^(low|medium|high)$"),
+}
+
+
+def validate_safe_custom_flags(flags: Optional[list[str]]) -> Optional[list[str]]:
+    """
+    Strictly validates custom_flags against an allowlist of safe agent options.
+    Rejects any unapproved flags, path arguments, subcommands, or option injection attempts.
+    """
+    if not flags:
+        return None
+
+    validated: list[str] = []
+    i = 0
+    while i < len(flags):
+        raw = flags[i]
+        if not isinstance(raw, str):
+            raise ValueError("Security violation: Each flag must be a string.")
+        flag = raw.strip()
+        if not flag:
+            i += 1
+            continue
+
+        if flag in ALLOWED_AGENT_FLAGS:
+            validated.append(flag)
+            i += 1
+            continue
+
+        if "=" in flag:
+            flag_name, flag_val = flag.split("=", 1)
+            flag_name = flag_name.strip()
+            flag_val = flag_val.strip()
+            if flag_name in ALLOWED_AGENT_VALUED_FLAGS:
+                pattern = ALLOWED_AGENT_VALUED_FLAGS[flag_name]
+                if not pattern.match(flag_val):
+                    raise ValueError(
+                        f"Security violation: Invalid value '{flag_val}' for flag '{flag_name}'."
+                    )
+                validated.append(f"{flag_name}={flag_val}")
+                i += 1
+                continue
+            else:
+                raise ValueError(
+                    f"Security violation: Flag '{flag_name}' is not permitted. Only allowlisted flags (--model, --effort, --dangerously-skip-permissions) are permitted."
+                )
+
+        if flag in ALLOWED_AGENT_VALUED_FLAGS:
+            pattern = ALLOWED_AGENT_VALUED_FLAGS[flag]
+            if i + 1 >= len(flags):
+                raise ValueError(f"Security violation: Flag '{flag}' requires a value.")
+            val = str(flags[i + 1]).strip()
+            if not pattern.match(val):
+                raise ValueError(
+                    f"Security violation: Invalid value '{val}' for flag '{flag}'."
+                )
+            validated.append(flag)
+            validated.append(val)
+            i += 2
+            continue
+
+        raise ValueError(
+            f"Security violation: Flag '{flag}' is not permitted. Only allowlisted flags (--model, --effort, --dangerously-skip-permissions) are permitted."
+        )
+
+    return validated if validated else None
+
+
 class RepoSubmitRequest(BaseModel):
     """Schema for submitting a GitHub repository URL."""
     repo_url: str = Field(
@@ -165,6 +237,11 @@ class InvokeAgentRequest(BaseModel):
     @classmethod
     def validate_session(cls, v: str) -> str:
         return validate_safe_session_id(v)
+
+    @field_validator("custom_flags")
+    @classmethod
+    def validate_flags(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        return validate_safe_custom_flags(v)
 
 
 class InvokeAgentResponse(BaseModel):
