@@ -19,6 +19,8 @@ from app.schemas.analysis import (
     LoadSkillResponse,
     PerformAnalysisRequest,
     PerformAnalysisResponse,
+    GenerateReportRequest,
+    GenerateReportResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
@@ -380,6 +382,42 @@ async def perform_analysis_endpoint(payload: PerformAnalysisRequest) -> PerformA
         step_title="Perform Repository Analysis",
         duration_ms=result["duration_ms"],
         message=f"Step 7 Successful: Codebase analysis complete. Overall Score: {result['overall_score']}/100 (Grade: {result['grade']}). 34 checklist rules evaluated across 4 pillars.",
+    )
+
+
+@router.post(
+    "/generate-report",
+    response_model=GenerateReportResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 8: Format & Generate Output",
+    description="Generates the analysis output strictly according to the format and requirements specified by the repo-analyzer skill and schemas/report_schema.json.",
+)
+async def generate_report_endpoint(payload: GenerateReportRequest) -> GenerateReportResponse:
+    """Execute Step 8 of the analysis pipeline."""
+    session_id = payload.session_id
+    logger.info("Step 8: Formatting and generating report", session_id=session_id)
+
+    try:
+        result = await agent_runner.generate_report(session_id=session_id)
+    except Exception as e:
+        logger.error("Step 8 failed during report generation", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Step 8 Failed: {str(e)}",
+        )
+
+    return GenerateReportResponse(
+        session_id=session_id,
+        repo_name=result["repo_name"],
+        schema_valid=result["schema_valid"],
+        schema_json=result["schema_json"],
+        frontend_report=result["frontend_report"],
+        status="generated",
+        step=8,
+        step_title="Generate Formatted Output",
+        duration_ms=result["duration_ms"],
+        message=f"Step 8 Successful: Structured report generated and validated against schemas/report_schema.json in {result['duration_ms']}ms.",
     )
 
 

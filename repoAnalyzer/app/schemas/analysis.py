@@ -246,5 +246,24 @@ class PerformAnalysisResponse(BaseModel):
     message: str
 
 
+class GenerateReportRequest(BaseModel):
+    """Schema for Step 8: Generating formatted output per repo-analyzer specifications."""
+    session_id: str = Field(..., description="Unique session ID from previous steps")
+
+
+class GenerateReportResponse(BaseModel):
+    """Schema for response when final formatted report is generated (Step 8)."""
+    session_id: str
+    repo_name: str
+    schema_valid: bool
+    schema_json: dict[str, Any]
+    frontend_report: dict[str, Any]
+    status: str = "generated"
+    step: int = 8
+    step_title: str = "Generate Formatted Output"
+    duration_ms: float
+    message: str
+
+
 
 

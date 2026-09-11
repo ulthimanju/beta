@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager
 from app.services.repo_inspector import repo_inspector
+from app.services.report_generator import report_generator
 
 
 logger = get_logger("agent_runner")
@@ -393,6 +394,22 @@ class AgentRunner:
             "status": "analyzed",
             "duration_ms": duration_ms,
         }
+
+    async def generate_report(self, session_id: str) -> dict[str, Any]:
+        """
+        Step 8: Generate formatted output strictly according to the format
+        and requirements specified by the repo-analyzer skill.
+        Produces schema-compliant JSON and human-readable raw markdown synthesis.
+        """
+        # Ensure analysis was executed
+        sandbox = sandbox_manager.get_sandbox(session_id)
+        if not sandbox:
+            raise AgentRunnerError(f"Session sandbox '{session_id}' not found or already closed.")
+
+        if not getattr(sandbox, "analysis_completed", False):
+            await self.perform_analysis(session_id)
+
+        return await asyncio.to_thread(report_generator.generate_report, session_id)
 
 
 agent_runner = AgentRunner()

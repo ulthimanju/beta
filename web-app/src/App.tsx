@@ -661,6 +661,62 @@ export function App() {
       setSteps((prev) =>
         prev.map((s, i) => (i === 6 ? { ...s, status: "completed" } : s))
       );
+
+      // ==========================================
+      // STEP 8: Generate Formatted Output
+      // ==========================================
+      setCurrentStepIndex(7);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 7 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 8/8] Generating formatted output strictly adhering to repo-analyzer specifications...`);
+      addLog("system", `[Step 8/8] Validating output payload against schemas/report_schema.json...`);
+
+      let reportRes = await fetch("/api/v1/generate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+        }),
+      }).catch(() => null);
+
+      if (!reportRes || !reportRes.ok) {
+        if (!reportRes || reportRes.status === 404 || reportRes.status === 502) {
+          const directReport = await fetch("http://localhost:8000/api/v1/generate-report", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+            }),
+          }).catch(() => null);
+          if (directReport) reportRes = directReport;
+        }
+      }
+
+      if (!reportRes) {
+        throw new Error("Unable to reach backend /api/v1/generate-report endpoint");
+      }
+
+      const reportData = await reportRes.json();
+
+      if (!reportRes.ok) {
+        const errDetail = reportData.detail || `Report generation failed with status ${reportRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 8/8] Report schema validated: ${reportData.schema_valid ? "Yes (Draft-07 Verified)" : "No"}`);
+      addLog("info", `[Step 8/8] Synthesized Markdown block ready for export (${reportData.frontend_report.rawMarkdownOutput.length} bytes).`);
+      addLog("agent", `[Step 8/8] Step 8 Complete: Structured report generated strictly conforming to repo-analyzer skill.`);
+      addLog("system", `[Pipeline Complete] All 8 lifecycle stages successfully executed. Interactive Report Dashboard online.`);
+
+      // Set frontend report state to render ReportDashboard
+      setReport(reportData.frontend_report);
+
+      // Mark Step 8 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 7 ? { ...s, status: "completed" } : s))
+      );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
     } catch (err: unknown) {
