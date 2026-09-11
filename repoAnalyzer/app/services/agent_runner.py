@@ -108,15 +108,19 @@ class AgentRunner:
         try:
             process = await asyncio.to_thread(
                 subprocess.Popen,
-                [binary_path, "--version"],
+                cmd,
                 cwd=working_dir,
                 env=sanitized_env,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
             pid = process.pid
 
+            # Register process in sandbox for tracking and graceful shutdown
+            sandbox.active_processes.append(process)
+            setattr(sandbox, "agent_process", process)
             setattr(sandbox, "agent_pid", pid)
             setattr(sandbox, "agent_invoked_command", cmd_str)
             setattr(sandbox, "agent_version", version)
@@ -174,6 +178,16 @@ class AgentRunner:
         setattr(sandbox, "active_query", query)
         setattr(sandbox, "active_model", active_model)
         setattr(sandbox, "mounted_skill_dir", mounted_skill_dir)
+
+        # Dispatch query to active agent process stdin if running
+        agent_proc = getattr(sandbox, "agent_process", None)
+        if agent_proc and agent_proc.stdin and not agent_proc.stdin.closed:
+            try:
+                agent_proc.stdin.write(f"{query}\n")
+                agent_proc.stdin.flush()
+                logger.info("Dispatched prompt to agent stdin", session_id=session_id, query=query)
+            except Exception as e:
+                logger.warning("Could not write query to agent stdin", session_id=session_id, error=str(e))
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         timestamp = datetime.now(timezone.utc).isoformat()
