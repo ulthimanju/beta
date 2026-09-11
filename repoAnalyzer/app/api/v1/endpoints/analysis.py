@@ -161,6 +161,8 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
         err_str = str(e)
         if "Security violation" in err_str:
             err_status = status.HTTP_400_BAD_REQUEST
+        elif "limit exceeded" in err_str.lower() or "too large" in err_str.lower():
+            err_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
         elif "timed out" in err_str.lower():
             err_status = status.HTTP_504_GATEWAY_TIMEOUT
         else:
