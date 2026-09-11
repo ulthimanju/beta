@@ -10,7 +10,6 @@ from typing import Any, Optional
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager, validate_skill_name_security, SandboxError
-from app.services.repo_inspector import repo_inspector
 from app.services.report_generator import report_generator
 
 
@@ -185,7 +184,16 @@ class AgentRunner:
         bytes_sent = len(query.encode("utf-8"))
         agent_pid = getattr(sandbox, "agent_pid", None)
 
-        if agent_proc and agent_proc.poll() is None and agent_proc.stdin and not agent_proc.stdin.closed:
+        # Check if existing agent process has already terminated
+        if agent_proc and agent_proc.poll() is not None:
+            rc = agent_proc.returncode
+            err = sandbox.get_agent_stderr() or ""
+            logger.error("AI agent process died before Step 5 query dispatch", session_id=session_id, pid=agent_proc.pid, exit_code=rc)
+            raise AgentRunnerError(f"AI agent process (PID: {agent_proc.pid}) died with exit code {rc} before query could be dispatched. Stderr: {err[:300].strip() or 'None'}")
+
+        if agent_proc and agent_proc.poll() is None:
+            if not agent_proc.stdin or agent_proc.stdin.closed:
+                raise AgentRunnerError(f"AI agent process (PID: {agent_proc.pid}) stdin is closed or unavailable.")
             try:
                 agent_proc.stdin.write(f"{query}\n")
                 agent_proc.stdin.flush()
@@ -198,8 +206,8 @@ class AgentRunner:
                     bytes_sent=bytes_sent,
                 )
             except Exception as e:
-                logger.warning("Error writing query to agent stdin", session_id=session_id, error=str(e))
-                communication_mode = "stdin_error"
+                logger.error("Failed writing query to agent stdin", session_id=session_id, error=str(e))
+                raise AgentRunnerError(f"Failed to transmit query to AI agent stdin: {str(e)}")
         else:
             # If no active agent process is running, spawn dedicated CLI agent subprocess for query dispatch
             logger.info(
@@ -214,35 +222,48 @@ class AgentRunner:
             sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
             sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
 
-            agent_proc = await asyncio.to_thread(
-                subprocess.Popen,
-                cmd,
-                cwd=working_dir,
-                env=sanitized_env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+            try:
+                agent_proc = await asyncio.to_thread(
+                    subprocess.Popen,
+                    cmd,
+                    cwd=working_dir,
+                    env=sanitized_env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            except Exception as e:
+                logger.error("Failed to spawn CLI AI agent process for query dispatch", session_id=session_id, error=str(e))
+                raise AgentRunnerError(f"Failed to spawn CLI AI agent process: {str(e)}")
+
             sandbox.register_process(agent_proc)
             setattr(sandbox, "agent_process", agent_proc)
             setattr(sandbox, "agent_pid", agent_proc.pid)
             agent_pid = agent_proc.pid
             communication_mode = "subprocess_invocation"
 
-            if agent_proc.stdin and not agent_proc.stdin.closed:
-                try:
-                    agent_proc.stdin.write(f"{query}\n")
-                    agent_proc.stdin.flush()
-                    logger.info(
-                        "Spawned agent subprocess and piped query to stdin",
-                        session_id=session_id,
-                        pid=agent_pid,
-                        query=query,
-                        bytes_sent=bytes_sent,
-                    )
-                except Exception as e:
-                    logger.warning("Error writing query to spawned agent stdin", session_id=session_id, error=str(e))
+            await asyncio.sleep(0.05)
+            if agent_proc.poll() is not None:
+                rc = agent_proc.returncode
+                err = sandbox.get_agent_stderr() or ""
+                raise AgentRunnerError(f"Spawned AI agent process (PID: {agent_pid}) died immediately on launch with exit code {rc}. Stderr: {err[:300].strip() or 'None'}")
+
+            if not agent_proc.stdin or agent_proc.stdin.closed:
+                raise AgentRunnerError(f"Spawned AI agent process (PID: {agent_pid}) stdin is closed.")
+            try:
+                agent_proc.stdin.write(f"{query}\n")
+                agent_proc.stdin.flush()
+                logger.info(
+                    "Spawned agent subprocess and piped query to stdin",
+                    session_id=session_id,
+                    pid=agent_pid,
+                    query=query,
+                    bytes_sent=bytes_sent,
+                )
+            except Exception as e:
+                logger.error("Failed writing query to spawned agent stdin", session_id=session_id, error=str(e))
+                raise AgentRunnerError(f"Failed to transmit query to spawned AI agent stdin: {str(e)}")
 
         setattr(sandbox, "query_dispatched", True)
         setattr(sandbox, "communication_mode", communication_mode)
@@ -495,6 +516,66 @@ class AgentRunner:
 
         return "".join(collected)
 
+    def _detect_agent_rejection(self, stdout: str, stderr: str) -> Optional[str]:
+        """
+        Detect if the CLI AI agent explicitly rejected the command, directive, or arguments.
+        """
+        combined = f"{stderr}\n{stdout}".lower()
+        rejection_indicators = [
+            "flag provided but not defined",
+            "unknown flag",
+            "unknown command",
+            "command not found",
+            "unrecognized command",
+            "command rejected",
+            "directive rejected",
+            "permission denied",
+            "access denied",
+            "invalid argument",
+            "invalid option",
+            "usage: agy",
+            "unknown shorthand flag",
+        ]
+        for pattern in rejection_indicators:
+            if pattern in combined:
+                for line in f"{stderr}\n{stdout}".splitlines():
+                    if pattern in line.lower():
+                        return line.strip()
+                return f"Rejection pattern detected: {pattern}"
+        return None
+
+    def _detect_model_unavailability(self, stdout: str, stderr: str) -> Optional[str]:
+        """
+        Detect if the requested AI model is unavailable, quota is exhausted, or authentication failed.
+        """
+        combined = f"{stderr}\n{stdout}".lower()
+        model_error_indicators = [
+            "model unavailable",
+            "model is unavailable",
+            "model not found",
+            "does not exist",
+            "quota exceeded",
+            "resource_exhausted",
+            "rate limit",
+            "insufficient_quota",
+            "unauthenticated",
+            "unauthorized",
+            "api key not set",
+            "invalid api key",
+            "authentication failed",
+            "service unavailable",
+            "model_not_found",
+            "overloaded",
+            "no capacity available",
+        ]
+        for pattern in model_error_indicators:
+            if pattern in combined:
+                for line in f"{stderr}\n{stdout}".splitlines():
+                    if pattern in line.lower():
+                        return line.strip()
+                return f"Model error detected: {pattern}"
+        return None
+
     def _parse_and_validate_ai_output(
         self,
         raw_text: str,
@@ -643,20 +724,22 @@ class AgentRunner:
             "executiveSummary, metadata (overallScore, grade, primaryArchitecturePattern, primaryLanguage), and pillars."
         )
 
-        if agent_proc and agent_proc.poll() is None and agent_proc.stdin and not agent_proc.stdin.closed:
-            try:
-                agent_proc.stdin.write(f"{analysis_instruction}\n")
-                agent_proc.stdin.flush()
-                logger.info(
-                    "Dispatched analysis directive to active AI agent runtime stdin",
-                    session_id=session_id,
-                    pid=agent_proc.pid,
-                    model=active_model,
-                )
-            except Exception as e:
-                logger.warning("Error communicating with agent stdin", session_id=session_id, error=str(e))
-        else:
-            # Spawn AI agent runtime if not currently active
+        # 1. Check if existing AI agent process is dead
+        if agent_proc and agent_proc.poll() is not None:
+            rc = agent_proc.returncode
+            err = sandbox.get_agent_stderr() or ""
+            logger.error(
+                "AI agent process died before Step 7 analysis execution",
+                session_id=session_id,
+                pid=agent_proc.pid,
+                exit_code=rc,
+            )
+            raise AgentRunnerError(
+                f"AI agent process (PID: {agent_proc.pid}) died with exit code {rc} before analysis could execute. Stderr: {err[:300].strip() or 'None'}"
+            )
+
+        # 2. If no process is running, spawn dedicated CLI AI agent process
+        if not agent_proc or agent_proc.poll() is not None:
             logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
             cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
             sanitized_env = dict(os.environ)
@@ -664,64 +747,109 @@ class AgentRunner:
             sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
             sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
 
-            agent_proc = await asyncio.to_thread(
-                subprocess.Popen,
-                cmd,
-                cwd=working_dir,
-                env=sanitized_env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+            try:
+                agent_proc = await asyncio.to_thread(
+                    subprocess.Popen,
+                    cmd,
+                    cwd=working_dir,
+                    env=sanitized_env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            except Exception as e:
+                logger.error("Failed to spawn CLI AI agent process for Step 7", session_id=session_id, error=str(e))
+                raise AgentRunnerError(f"Failed to spawn CLI AI agent process: {str(e)}")
+
             sandbox.register_process(agent_proc)
             setattr(sandbox, "agent_process", agent_proc)
             setattr(sandbox, "agent_pid", agent_proc.pid)
-            if agent_proc.stdin and not agent_proc.stdin.closed:
-                try:
-                    agent_proc.stdin.write(f"{analysis_instruction}\n")
-                    agent_proc.stdin.flush()
-                except Exception as e:
-                    logger.warning("Error writing to spawned agent stdin", session_id=session_id, error=str(e))
 
-        # Await AI agent stdout output from background stream consumer
-        raw_stdout = await self._wait_for_agent_output(sandbox, timeout=3.0)
-        raw_stderr = sandbox.get_agent_stderr()
-        if raw_stderr:
-            logger.info(
-                "Captured AI agent stderr in background stream consumer",
-                session_id=session_id,
-                stderr_len=len(raw_stderr),
-                sample=raw_stderr[:200],
+            await asyncio.sleep(0.05)
+            if agent_proc.poll() is not None:
+                rc = agent_proc.returncode
+                err = sandbox.get_agent_stderr() or ""
+                raise AgentRunnerError(
+                    f"AI agent process (PID: {agent_proc.pid}) died immediately on launch with exit code {rc}. Stderr: {err[:300].strip() or 'None'}"
+                )
+
+        # 3. Transmit analysis instruction to agent stdin (fail explicitly if stdin fails)
+        if not agent_proc.stdin or agent_proc.stdin.closed:
+            raise AgentRunnerError(
+                f"AI agent process (PID: {agent_proc.pid}) stdin is closed or unavailable. Cannot transmit analysis directive."
             )
 
-        # Attempt to parse and validate AI analysis output from stdout
+        try:
+            agent_proc.stdin.write(f"{analysis_instruction}\n")
+            agent_proc.stdin.flush()
+            logger.info(
+                "Dispatched analysis directive to active AI agent runtime stdin",
+                session_id=session_id,
+                pid=agent_proc.pid,
+                model=active_model,
+            )
+        except Exception as e:
+            logger.error("Failed to transmit analysis directive to AI agent stdin", session_id=session_id, error=str(e))
+            raise AgentRunnerError(
+                f"AI agent stdin communication failed: {str(e)}. Process cannot receive analysis directive."
+            )
+
+        # 4. Await AI agent stdout output from background stream consumer
+        raw_stdout = await self._wait_for_agent_output(sandbox, timeout=3.0)
+        raw_stderr = sandbox.get_agent_stderr()
+
+        # 5. Check if AI process died during execution
+        if agent_proc.poll() is not None and agent_proc.returncode != 0:
+            err_msg = raw_stderr[:300].strip() or (raw_stdout[:300].strip() if raw_stdout else "None")
+            logger.error(
+                "AI agent process died during analysis execution",
+                session_id=session_id,
+                pid=agent_proc.pid,
+                exit_code=agent_proc.returncode,
+                error=err_msg,
+            )
+            raise AgentRunnerError(
+                f"AI agent process (PID: {agent_proc.pid}) died during analysis execution with exit code {agent_proc.returncode}. Error: {err_msg}"
+            )
+
+        # 6. Check if agent rejected the command
+        rejection_reason = self._detect_agent_rejection(raw_stdout, raw_stderr)
+        if rejection_reason:
+            logger.error("AI agent rejected the analysis command", session_id=session_id, reason=rejection_reason)
+            raise AgentRunnerError(f"AI agent rejected analysis directive: {rejection_reason}")
+
+        # 7. Check if model is unavailable
+        model_error = self._detect_model_unavailability(raw_stdout, raw_stderr)
+        if model_error:
+            logger.error("AI agent model is unavailable", session_id=session_id, model=active_model, error=model_error)
+            raise AgentRunnerError(f"AI agent model '{active_model}' is unavailable: {model_error}")
+
+        # 8. Attempt to parse and validate AI analysis output from stdout
         ai_inspection = self._parse_and_validate_ai_output(
             raw_stdout, repo_name, working_dir, active_model, ai_evaluator
         )
 
-        if ai_inspection:
-            inspection = ai_inspection
-            logger.info(
-                "Step 7: AI agent analysis output successfully read from stdout, parsed, and validated",
-                session_id=session_id,
-                overall_score=inspection["overall_score"],
-                grade=inspection["grade"],
-                source=inspection["ai_analysis_source"],
-            )
-        else:
-            logger.info(
-                "Step 7: AI stdout did not contain complete JSON payload; executing evidence inspection grounded in repo-analyzer skill directives",
+        if not ai_inspection:
+            sample_err = raw_stderr[:300].strip() if raw_stderr else (raw_stdout[:300].strip() if raw_stdout else "No output received from agent")
+            logger.error(
+                "AI agent failed to generate valid repository analysis JSON output",
                 session_id=session_id,
                 stdout_len=len(raw_stdout),
+                sample=sample_err,
             )
-            inspection = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
-            inspection["ai_agent_invoked"] = True
-            inspection["ai_agent_model"] = active_model
-            inspection["ai_agent_evaluator"] = ai_evaluator
-            inspection["ai_agent_pid"] = getattr(sandbox, "agent_pid", agent_proc.pid if agent_proc else None)
-            inspection["raw_ai_stdout"] = raw_stdout[:2000] if raw_stdout else ""
-            inspection["ai_analysis_source"] = "repo_analyzer_skill_grounded"
+            raise AgentRunnerError(
+                f"AI agent failed to produce valid repository analysis output adhering to schemas/report_schema.json. Agent output: {sample_err}"
+            )
+
+        inspection = ai_inspection
+        logger.info(
+            "Step 7: AI agent analysis output successfully read from stdout, parsed, and validated",
+            session_id=session_id,
+            overall_score=inspection["overall_score"],
+            grade=inspection["grade"],
+            source=inspection["ai_analysis_source"],
+        )
 
         # Compute rules summary
         total_rules = 0
