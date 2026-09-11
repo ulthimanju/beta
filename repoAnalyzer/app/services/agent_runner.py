@@ -119,7 +119,7 @@ class AgentRunner:
             pid = process.pid
 
             # Register process in sandbox for tracking and graceful shutdown
-            sandbox.active_processes.append(process)
+            sandbox.register_process(process)
             setattr(sandbox, "agent_process", process)
             setattr(sandbox, "agent_pid", pid)
             setattr(sandbox, "agent_invoked_command", cmd_str)
@@ -224,7 +224,7 @@ class AgentRunner:
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            sandbox.active_processes.append(agent_proc)
+            sandbox.register_process(agent_proc)
             setattr(sandbox, "agent_process", agent_proc)
             setattr(sandbox, "agent_pid", agent_proc.pid)
             agent_pid = agent_proc.pid
@@ -472,7 +472,7 @@ class AgentRunner:
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            sandbox.active_processes.append(agent_proc)
+            sandbox.register_process(agent_proc)
             setattr(sandbox, "agent_process", agent_proc)
             setattr(sandbox, "agent_pid", agent_proc.pid)
             if agent_proc.stdin and not agent_proc.stdin.closed:

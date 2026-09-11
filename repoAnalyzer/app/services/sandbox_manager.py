@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -80,7 +81,21 @@ class SessionSandbox:
         self.root_dir = candidate_root
         self.repo_dir: Optional[str] = None
         self.working_dir: Optional[str] = None
-        self.active_processes: list[asyncio.subprocess.Process] = []
+        self.active_processes: list[Any] = []
+        self.agent_process: Optional[Any] = None
+        self.agent_pid: Optional[int] = None
+
+    def register_process(self, proc: Any) -> None:
+        """
+        Register a running process in this sandbox for lifecycle tracking and cleanup.
+        Ensures active_processes tracks the process and agent_process is bound.
+        """
+        if proc is not None:
+            if proc not in self.active_processes:
+                self.active_processes.append(proc)
+            self.agent_process = proc
+            if hasattr(proc, "pid"):
+                self.agent_pid = proc.pid
 
     def initialize(self) -> str:
         """Create the isolated sandbox directory on disk."""
@@ -310,17 +325,82 @@ class SessionSandbox:
         """
         logger.info("Closing and cleaning up sandbox", session_id=self.session_id, path=self.root_dir)
 
-        # 1. Kill any active processes
-        for proc in self.active_processes:
+        # 1. Terminate any active processes
+        procs_to_terminate: list[Any] = list(self.active_processes)
+        agent_proc = getattr(self, "agent_process", None)
+        if agent_proc and agent_proc not in procs_to_terminate:
+            procs_to_terminate.append(agent_proc)
+
+        for proc in procs_to_terminate:
             try:
-                if proc.returncode is None:
-                    proc.terminate()
-                    await asyncio.sleep(0.1)
-                    if proc.returncode is None:
-                        proc.kill()
+                pid = getattr(proc, "pid", None)
+                # Check if process is still running
+                is_running = False
+                if hasattr(proc, "poll"):
+                    is_running = (proc.poll() is None)
+                elif hasattr(proc, "returncode"):
+                    is_running = (proc.returncode is None)
+
+                if is_running:
+                    logger.info("Terminating sandbox process", session_id=self.session_id, pid=pid)
+
+                    # Close standard streams to prevent pipe deadlock and resource locking
+                    for stream_name in ("stdin", "stdout", "stderr"):
+                        stream = getattr(proc, stream_name, None)
+                        if stream and hasattr(stream, "close") and not getattr(stream, "closed", True):
+                            try:
+                                stream.close()
+                            except Exception:
+                                pass
+
+                    # Attempt graceful termination
+                    try:
+                        proc.terminate()
+                    except (ProcessLookupError, OSError):
+                        pass
+
+                    # Allow brief grace period for exit
+                    for _ in range(6):
+                        await asyncio.sleep(0.05)
+                        if hasattr(proc, "poll") and proc.poll() is not None:
+                            break
+                        if hasattr(proc, "returncode") and proc.returncode is not None:
+                            break
+
+                    # Force kill if still running
+                    still_alive = False
+                    if hasattr(proc, "poll"):
+                        still_alive = (proc.poll() is None)
+                    elif hasattr(proc, "returncode"):
+                        still_alive = (proc.returncode is None)
+
+                    if still_alive:
+                        try:
+                            proc.kill()
+                        except (ProcessLookupError, OSError):
+                            pass
+
+                    # On Windows, kill process tree by PID to eliminate orphan child processes
+                    if os.name == "nt" and pid:
+                        try:
+                            subprocess.run(
+                                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                                check=False,
+                                capture_output=True,
+                                timeout=5,
+                            )
+                        except Exception:
+                            pass
+
+                    # Final poll to reap process
+                    if hasattr(proc, "poll"):
+                        proc.poll()
             except Exception as e:
-                logger.warning("Error terminating sandbox process", error=str(e))
+                logger.warning("Error terminating sandbox process", session_id=self.session_id, error=str(e))
+
         self.active_processes.clear()
+        self.agent_process = None
+        self.agent_pid = None
 
         # 2. Delete the directory tree
         if os.path.exists(self.root_dir):
