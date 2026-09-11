@@ -108,17 +108,14 @@ class AgentRunner:
             version=version,
         )
 
-        sanitized_env = dict(os.environ)
-        sanitized_env.pop("ANTIGRAVITY_AGENT", None)
-        sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
-        sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
+        isolated_env = sandbox.build_isolated_environment(working_dir)
 
         try:
             process = await asyncio.to_thread(
                 subprocess.Popen,
                 cmd,
                 cwd=working_dir,
-                env=sanitized_env,
+                env=isolated_env,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -226,17 +223,14 @@ class AgentRunner:
             )
             binary_path = self.resolve_binary()
             cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
-            sanitized_env = dict(os.environ)
-            sanitized_env.pop("ANTIGRAVITY_AGENT", None)
-            sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
-            sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
+            isolated_env = sandbox.build_isolated_environment(working_dir)
 
             try:
                 agent_proc = await asyncio.to_thread(
                     subprocess.Popen,
                     cmd,
                     cwd=working_dir,
-                    env=sanitized_env,
+                    env=isolated_env,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -751,17 +745,14 @@ class AgentRunner:
         if not agent_proc or agent_proc.poll() is not None:
             logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
             cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
-            sanitized_env = dict(os.environ)
-            sanitized_env.pop("ANTIGRAVITY_AGENT", None)
-            sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
-            sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
+            isolated_env = sandbox.build_isolated_environment(working_dir)
 
             try:
                 agent_proc = await asyncio.to_thread(
                     subprocess.Popen,
                     cmd,
                     cwd=working_dir,
-                    env=sanitized_env,
+                    env=isolated_env,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

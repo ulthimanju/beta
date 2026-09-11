@@ -31,6 +31,59 @@ def validate_session_id_security(session_id: str) -> str:
 
 SKILL_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
+# Sensitive environment variable name patterns that must never be exposed to subprocesses
+SENSITIVE_ENV_PATTERNS = (
+    "KEY",
+    "SECRET",
+    "TOKEN",
+    "PASSWORD",
+    "PASSWD",
+    "AUTH",
+    "CREDENTIAL",
+    "DATABASE",
+    "DB_",
+    "MONGO",
+    "POSTGRES",
+    "REDIS",
+    "AWS",
+    "GCP",
+    "AZURE",
+    "PRIVATE",
+    "BEARER",
+    "JWT",
+)
+
+# Strictly allowlisted system environment variables needed for OS and CLI process execution
+ALLOWED_SYSTEM_ENV_VARS = {
+    # Windows system essentials (vital for Win32 API, DLL resolution, and socket layer)
+    "SYSTEMROOT",
+    "WINDIR",
+    "SYSTEMDRIVE",
+    "COMSPEC",
+    "PATHEXT",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    # Execution & User essentials
+    "PATH",
+    "LOCALAPPDATA",
+    "APPDATA",
+    "USERPROFILE",
+    # Unix/POSIX system essentials
+    "HOME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "TZ",
+}
+
+
+def is_sensitive_env_key(key: str) -> bool:
+    """Check if an environment variable name matches any sensitive credential pattern."""
+    key_upper = key.upper()
+    return any(pattern in key_upper for pattern in SENSITIVE_ENV_PATTERNS)
+
 
 def validate_skill_name_security(skill_name: str) -> str:
     """
@@ -405,6 +458,57 @@ class SessionSandbox:
                 except ValueError:
                     pass
         return real_root
+
+    def build_isolated_environment(
+        self,
+        working_dir: Optional[str] = None,
+        extra_env: Optional[dict[str, str]] = None,
+    ) -> dict[str, str]:
+        """
+        Construct a strictly isolated process environment for sandbox subprocesses.
+
+        Security guarantees:
+        1. Zero inheritance of arbitrary host environment variables (prevents leaking API keys,
+           database credentials, cloud credentials, CI tokens, service secrets).
+        2. Strict allowlist of core OS runtime variables required to boot and run executables (SYSTEMROOT, PATH, etc.).
+        3. Defense-in-depth secret pattern scrubbing for both system and extra variables.
+        4. Temporary directory redirection to an isolated sandbox-local directory (.tmp).
+        5. Sandbox boundary context injection (ANTIGRAVITY_SANDBOX_DIR, ANTIGRAVITY_WORKING_DIR).
+        """
+        isolated_env: dict[str, str] = {}
+
+        # 1. Populate only from strict system allowlist, scrubbing any sensitive patterns
+        for var_name in ALLOWED_SYSTEM_ENV_VARS:
+            if var_name in os.environ and not is_sensitive_env_key(var_name):
+                isolated_env[var_name] = os.environ[var_name]
+
+        # 2. Add extra variables if explicitly passed, validating against sensitive patterns
+        if extra_env:
+            for k, v in extra_env.items():
+                if not is_sensitive_env_key(k):
+                    isolated_env[k] = str(v)
+                else:
+                    logger.warning("Rejected sensitive variable from extra_env", key=k)
+
+        # 3. Redirect temp directories inside the sandbox
+        sandbox_tmp = os.path.join(self.root_dir, ".tmp")
+        try:
+            os.makedirs(sandbox_tmp, exist_ok=True)
+        except OSError:
+            pass
+        isolated_env["TEMP"] = sandbox_tmp
+        isolated_env["TMP"] = sandbox_tmp
+        isolated_env["TMPDIR"] = sandbox_tmp
+
+        # 4. Contextual sandbox metadata
+        target_work_dir = working_dir or self.get_working_directory()
+        isolated_env["ANTIGRAVITY_SANDBOX_DIR"] = self.root_dir
+        isolated_env["ANTIGRAVITY_WORKING_DIR"] = target_work_dir
+
+        # 5. Explicitly ensure prohibited agent recursion flag is purged
+        isolated_env.pop("ANTIGRAVITY_AGENT", None)
+
+        return isolated_env
 
     def get_stats(self) -> dict[str, Any]:
         """Compute disk usage and file count inside this sandbox."""
