@@ -119,7 +119,7 @@ class SessionSandbox:
     def set_working_directory(self, target_path: Optional[str] = None) -> dict[str, Any]:
         """
         Step 3: Set and verify the working directory inside the sandbox.
-        Ensures strict boundary security (no directory traversal outside sandbox root).
+        Ensures strict boundary security (no directory traversal or symlink escapes outside sandbox root).
         Inspects directory contents and detects ecosystem/project framework markers.
         """
         if target_path is None:
@@ -127,33 +127,60 @@ class SessionSandbox:
                 target_path = self.repo_dir
             else:
                 target_path = self.root_dir
+        elif not os.path.isabs(target_path):
+            base = self.repo_dir if (self.repo_dir and os.path.exists(self.repo_dir)) else self.root_dir
+            target_path = os.path.join(base, target_path)
 
-        resolved_target = os.path.abspath(target_path)
-        resolved_root = os.path.abspath(self.root_dir)
+        lexical_target = os.path.abspath(target_path)
+        lexical_root = os.path.abspath(self.root_dir)
 
-        # Sandbox boundary security check
+        # Canonical path resolution (resolves symlinks and junctions)
+        real_target = os.path.realpath(lexical_target)
+        real_root = os.path.realpath(lexical_root)
+
+        # 1. Existence and directory verification
+        if not os.path.exists(real_target):
+            raise SandboxError(f"Working directory does not exist: '{target_path}'")
+
+        if not os.path.isdir(real_target):
+            raise SandboxError(f"Target path is not a directory: '{target_path}'")
+
+        # 2. Strict canonical containment check (prevents symlink escape attacks)
         try:
-            common = os.path.commonpath([resolved_root, resolved_target])
-            if common != resolved_root:
-                raise SandboxError(f"Security violation: Target directory '{target_path}' lies outside sandbox boundary.")
+            common = os.path.commonpath([real_root, real_target])
+            if common != real_root:
+                raise SandboxError(
+                    f"Security violation: Target directory '{target_path}' resolves outside sandbox boundary via symlink to '{real_target}'."
+                )
         except ValueError:
-            raise SandboxError(f"Security violation: Target directory '{target_path}' is on an invalid path.")
+            raise SandboxError(f"Security violation: Target directory '{target_path}' is on an invalid or unshared drive.")
 
-        if not os.path.exists(resolved_target):
-            raise SandboxError(f"Working directory does not exist: '{resolved_target}'")
+        # 3. Intermediate path component symlink check
+        curr = lexical_target
+        while True:
+            if os.path.islink(curr):
+                link_dest = os.path.realpath(curr)
+                try:
+                    if os.path.commonpath([real_root, link_dest]) != real_root:
+                        raise SandboxError(
+                            f"Security violation: Symlink component '{curr}' points outside sandbox boundary to '{link_dest}'."
+                        )
+                except ValueError:
+                    raise SandboxError(f"Security violation: Symlink component '{curr}' points across drives.")
+            parent = os.path.dirname(curr)
+            if parent == curr or len(curr) <= len(lexical_root):
+                break
+            curr = parent
 
-        if not os.path.isdir(resolved_target):
-            raise SandboxError(f"Target path is not a directory: '{resolved_target}'")
-
-        self.working_dir = resolved_target
+        self.working_dir = real_target
 
         # Inspect entries
         try:
-            entries = sorted(os.listdir(resolved_target))
+            entries = sorted(os.listdir(real_target))
         except OSError as e:
             raise SandboxError(f"Failed to read directory contents: {str(e)}")
 
-        is_git_worktree = os.path.isdir(os.path.join(resolved_target, ".git"))
+        is_git_worktree = os.path.isdir(os.path.join(real_target, ".git"))
         readme_present = any(e.lower().startswith("readme") for e in entries)
 
         # Detect frameworks and project markers
@@ -179,8 +206,8 @@ class SessionSandbox:
         if "Makefile" in entry_set:
             detected_frameworks.append("Make")
 
-        relative_path = os.path.relpath(resolved_target, self.root_dir)
-        repo_name = os.path.basename(resolved_target)
+        relative_path = os.path.relpath(real_target, real_root)
+        repo_name = os.path.basename(real_target)
 
         logger.info(
             "Working directory set inside Session Sandbox",
@@ -204,12 +231,17 @@ class SessionSandbox:
         }
 
     def get_working_directory(self) -> str:
-        """Return the current working directory inside the sandbox."""
-        if self.working_dir and os.path.exists(self.working_dir):
-            return self.working_dir
-        if self.repo_dir and os.path.exists(self.repo_dir):
-            return self.repo_dir
-        return self.root_dir
+        """Return the current verified canonical working directory inside the sandbox."""
+        real_root = os.path.realpath(self.root_dir)
+        for candidate in (self.working_dir, self.repo_dir, self.root_dir):
+            if candidate and os.path.exists(candidate):
+                real_candidate = os.path.realpath(candidate)
+                try:
+                    if os.path.commonpath([real_root, real_candidate]) == real_root:
+                        return real_candidate
+                except ValueError:
+                    pass
+        return real_root
 
     def get_stats(self) -> dict[str, Any]:
         """Compute disk usage and file count inside this sandbox."""
