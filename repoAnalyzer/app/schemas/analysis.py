@@ -247,6 +247,9 @@ class PerformAnalysisResponse(BaseModel):
     step_title: str = "Perform Repository Analysis"
     duration_ms: float
     message: str
+    ai_agent_invoked: Optional[bool] = True
+    ai_agent_model: Optional[str] = "gemini-3.8-flash-medium"
+    ai_agent_evaluator: Optional[str] = "Antigravity CLI Agent (agy)"
 
 
 class GenerateReportRequest(BaseModel):

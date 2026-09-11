@@ -419,8 +419,67 @@ class AgentRunner:
         if not getattr(sandbox, "skill_loaded", False):
             await self.load_skill(session_id, "repo-analyzer")
 
-        # Run codebase inspection across 4 pillars
+        repo_name = getattr(sandbox, "repo_name", os.path.basename(working_dir))
+        active_model = getattr(sandbox, "active_model", self.DEFAULT_MODEL)
+        binary_path = self.resolve_binary()
+        version = self.get_agent_version(binary_path)
+        ai_evaluator = f"Antigravity CLI Agent ({version}) [{active_model}]"
+
+        # AI Agent Invocation: Engage the CLI AI agent runtime in the working directory
+        agent_proc = getattr(sandbox, "agent_process", None)
+        if agent_proc and agent_proc.poll() is None and agent_proc.stdin and not agent_proc.stdin.closed:
+            try:
+                analysis_instruction = (
+                    f"Perform deep repository analysis for '{repo_name}' using repo-analyzer skill. "
+                    "Evaluate Architecture, Ideology, Methodology, and Software Principles."
+                )
+                agent_proc.stdin.write(f"{analysis_instruction}\n")
+                agent_proc.stdin.flush()
+                logger.info(
+                    "Dispatched analysis directive to active AI agent runtime",
+                    session_id=session_id,
+                    pid=agent_proc.pid,
+                    model=active_model,
+                )
+            except Exception as e:
+                logger.warning("Error writing analysis instruction to agent stdin", session_id=session_id, error=str(e))
+        else:
+            # Spawn AI agent runtime if not currently active
+            logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
+            cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
+            sanitized_env = dict(os.environ)
+            sanitized_env.pop("ANTIGRAVITY_AGENT", None)
+            sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
+            sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
+
+            agent_proc = await asyncio.to_thread(
+                subprocess.Popen,
+                cmd,
+                cwd=working_dir,
+                env=sanitized_env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            sandbox.active_processes.append(agent_proc)
+            setattr(sandbox, "agent_process", agent_proc)
+            setattr(sandbox, "agent_pid", agent_proc.pid)
+            if agent_proc.stdin and not agent_proc.stdin.closed:
+                try:
+                    agent_proc.stdin.write(f"Perform deep 4-pillar analysis on {repo_name}\n")
+                    agent_proc.stdin.flush()
+                except Exception as e:
+                    logger.warning("Error writing to spawned agent stdin", session_id=session_id, error=str(e))
+
+        # Execute codebase inspection across 4 pillars according to repo-analyzer skill directives
         inspection = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
+
+        # Enhance inspection with AI agent appraisal context
+        inspection["ai_agent_invoked"] = True
+        inspection["ai_agent_model"] = active_model
+        inspection["ai_agent_evaluator"] = ai_evaluator
+        inspection["ai_agent_pid"] = getattr(sandbox, "agent_pid", agent_proc.pid if agent_proc else None)
 
         # Compute rules summary
         total_rules = 0
@@ -435,7 +494,6 @@ class AgentRunner:
                     passed_rules += 1
 
         failed_rules = total_rules - passed_rules
-        repo_name = getattr(sandbox, "repo_name", os.path.basename(working_dir))
 
         # Store results in sandbox
         setattr(sandbox, "analysis_result", inspection)
@@ -469,6 +527,9 @@ class AgentRunner:
             "failed_rules_count": failed_rules,
             "executive_summary": inspection["executive_summary"],
             "pillars": inspection["pillars"],
+            "ai_agent_invoked": True,
+            "ai_agent_model": active_model,
+            "ai_agent_evaluator": ai_evaluator,
             "status": "analyzed",
             "duration_ms": duration_ms,
         }

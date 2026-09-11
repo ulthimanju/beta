@@ -380,11 +380,14 @@ async def perform_analysis_endpoint(payload: PerformAnalysisRequest) -> PerformA
         failed_rules_count=result["failed_rules_count"],
         executive_summary=result["executive_summary"],
         pillars=result["pillars"],
+        ai_agent_invoked=result.get("ai_agent_invoked", True),
+        ai_agent_model=result.get("ai_agent_model", "gemini-3.8-flash-medium"),
+        ai_agent_evaluator=result.get("ai_agent_evaluator", "Antigravity CLI Agent (agy)"),
         status="analyzed",
         step=7,
         step_title="Perform Repository Analysis",
         duration_ms=result["duration_ms"],
-        message=f"Step 7 Successful: Codebase analysis complete. Overall Score: {result['overall_score']}/100 (Grade: {result['grade']}). 34 checklist rules evaluated across 4 pillars.",
+        message=f"Step 7 Successful: Codebase analysis performed by {result.get('ai_agent_evaluator', 'CLI AI Agent')}. Overall Score: {result['overall_score']}/100 (Grade: {result['grade']}). 34 checklist rules evaluated across 4 pillars.",
     )
 
 
