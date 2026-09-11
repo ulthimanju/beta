@@ -78,8 +78,11 @@ async def submit_repository(payload: RepoSubmitRequest) -> RepoSubmitResponse:
 
     owner, repo_name = parts[0], parts[1]
 
-    # Initialize Session Sandbox
+    # Initialize Session Sandbox and bind validated repo metadata
     sandbox = sandbox_manager.get_or_create_sandbox(session_id)
+    setattr(sandbox, "repo_url", repo_url)
+    setattr(sandbox, "owner", owner)
+    setattr(sandbox, "repo_name", repo_name)
 
     logger.info(
         "Step 1: Repository URL received & Session Sandbox initialized",
@@ -131,10 +134,25 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
     session_id = payload.session_id
     repo_url = payload.repo_url
 
+    sandbox = sandbox_manager.get_sandbox(session_id)
+    if not sandbox:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session sandbox '{session_id}' not found or already closed. Please complete Step 1 first.",
+        )
+
+    # Verify that requested clone URL matches the verified URL from Step 1
+    registered_url = getattr(sandbox, "repo_url", None)
+    if registered_url and registered_url.lower() != repo_url.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Security violation: Repository URL '{repo_url}' does not match verified URL '{registered_url}' for session '{session_id}'.",
+        )
+
     parsed = urlparse(repo_url)
     parts = [p for p in parsed.path.strip("/").split("/") if p]
-    owner = parts[0] if len(parts) > 0 else "unknown"
-    repo_name = parts[1] if len(parts) > 1 else "unknown"
+    owner = parts[0] if len(parts) > 0 else getattr(sandbox, "owner", "unknown")
+    repo_name = parts[1] if len(parts) > 1 else getattr(sandbox, "repo_name", "unknown")
 
     logger.info("Step 2: Cloning repository into Session Sandbox", session_id=session_id, repo_url=repo_url)
 
@@ -143,7 +161,7 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
     except GitCloneError as e:
         logger.error("Step 2 failed during sandbox clone", session_id=session_id, error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST if "Security violation" in str(e) else status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Step 2 Sandbox Clone Failure: {str(e)}",
         )
 

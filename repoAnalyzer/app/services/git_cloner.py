@@ -60,10 +60,30 @@ def _sync_get_git_metadata(directory: str) -> tuple[str, str]:
         return "unknown", "main"
 
 
+import re
+
+def validate_repo_url_security(url: str) -> str:
+    """
+    Strictly validates repository URL to prevent SSRF, local file disclosure,
+    and Git argument injection attacks.
+    """
+    clean_url = (url or "").strip().rstrip("/")
+    if not clean_url or clean_url.startswith("-"):
+        raise GitCloneError("Security violation: Invalid repository URL format or option injection attempt.")
+
+    pattern = r"^https?://(www\.)?github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)(\.git)?$"
+    if not re.match(pattern, clean_url):
+        raise GitCloneError(
+            "Security violation: Only public GitHub repositories over HTTP(S) are permitted (e.g. https://github.com/owner/repo)."
+        )
+
+    return clean_url
+
+
 def _sync_clone(repo_url: str, target_dir: str) -> subprocess.CompletedProcess[str]:
-    """Execute git clone command synchronously inside a worker thread."""
+    """Execute git clone command synchronously inside a worker thread with option injection protection."""
     return subprocess.run(
-        [GIT_BIN, "clone", "--depth", "1", repo_url, target_dir],
+        [GIT_BIN, "clone", "--depth", "1", "--", repo_url, target_dir],
         capture_output=True,
         text=True,
         check=False,
@@ -75,6 +95,9 @@ async def clone_repository_into_sandbox(repo_url: str, session_id: str) -> dict[
     Execute Step 2: Clone repository directly into the dedicated Session Sandbox.
     The sandbox boundary holds the repo and all session assets.
     """
+    # Strict URL validation before any filesystem or process activity
+    clean_repo_url = validate_repo_url_security(repo_url)
+
     start_time = time.perf_counter()
     sandbox: SessionSandbox = sandbox_manager.get_or_create_sandbox(session_id)
     target_repo_dir = sandbox.set_repo_dir("repo")
@@ -84,12 +107,12 @@ async def clone_repository_into_sandbox(repo_url: str, session_id: str) -> dict[
         session_id=session_id,
         sandbox_root=sandbox.root_dir,
         target_dir=target_repo_dir,
-        repo_url=repo_url,
+        repo_url=clean_repo_url,
     )
 
     try:
         # Run shallow clone directly into sandbox repository folder
-        proc = await asyncio.to_thread(_sync_clone, repo_url, target_repo_dir)
+        proc = await asyncio.to_thread(_sync_clone, clean_repo_url, target_repo_dir)
 
         if proc.returncode != 0:
             err_msg = proc.stderr.strip() or proc.stdout.strip() or "Git clone command failed."

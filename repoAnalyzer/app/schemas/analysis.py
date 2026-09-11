@@ -4,6 +4,20 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+def validate_github_repo_url(v: str) -> str:
+    """Validate that the given URL is strictly a valid public GitHub URL."""
+    clean_url = v.strip().rstrip("/")
+    if clean_url.startswith("-"):
+        raise ValueError("Invalid repository URL format. Parameter injection detected.")
+    pattern = r"^https?://(www\.)?github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)(\.git)?$"
+    match = re.match(pattern, clean_url)
+    if not match:
+        raise ValueError(
+            "Invalid repository URL format. Must be a valid GitHub URL: https://github.com/owner/repository"
+        )
+    return clean_url
+
+
 class RepoSubmitRequest(BaseModel):
     """Schema for submitting a GitHub repository URL."""
     repo_url: str = Field(
@@ -15,14 +29,7 @@ class RepoSubmitRequest(BaseModel):
     @field_validator("repo_url")
     @classmethod
     def validate_github_url(cls, v: str) -> str:
-        clean_url = v.strip().rstrip("/")
-        pattern = r"^https?://(www\.)?github\.com/([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)$"
-        match = re.match(pattern, clean_url)
-        if not match:
-            raise ValueError(
-                "Invalid repository URL format. Must be a valid GitHub URL: https://github.com/owner/repository"
-            )
-        return clean_url
+        return validate_github_repo_url(v)
 
 
 class RepoSubmitResponse(BaseModel):
@@ -42,6 +49,11 @@ class CloneRepoRequest(BaseModel):
     """Schema for requesting repository clone in Step 2."""
     session_id: str = Field(..., description="Unique session ID from Step 1")
     repo_url: str = Field(..., description="Target repository URL verified in Step 1")
+
+    @field_validator("repo_url")
+    @classmethod
+    def validate_github_url(cls, v: str) -> str:
+        return validate_github_repo_url(v)
 
 
 class CloneRepoResponse(BaseModel):
