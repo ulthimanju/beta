@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.services.sandbox_manager import sandbox_manager
+from app.services.sandbox_manager import sandbox_manager, validate_skill_name_security, SandboxError
 from app.services.repo_inspector import repo_inspector
 from app.services.report_generator import report_generator
 
@@ -294,21 +294,31 @@ class AgentRunner:
         if not sandbox:
             raise AgentRunnerError(f"Session sandbox '{session_id}' not found or already closed.")
 
+        try:
+            clean_skill = validate_skill_name_security(skill_name)
+        except SandboxError as e:
+            raise AgentRunnerError(str(e))
+
         # Ensure skill is mounted in sandbox
-        mounted_skill_dir = sandbox.mount_skill(skill_name)
+        mounted_skill_dir = sandbox.mount_skill(clean_skill)
         if not mounted_skill_dir or not os.path.exists(mounted_skill_dir):
-            candidates = [
-                os.path.join(sandbox.root_dir, ".agents", "skills", skill_name),
-                os.path.join(os.getcwd(), ".agents", "skills", skill_name),
-                os.path.expanduser(f"~/.agents/skills/{skill_name}"),
+            real_root = os.path.realpath(sandbox.root_dir)
+            allowed_candidate_roots = [
+                os.path.realpath(os.path.join(real_root, ".agents", "skills")),
+                os.path.realpath(os.path.join(os.getcwd(), ".agents", "skills")),
+                os.path.realpath(os.path.expanduser("~/.agents/skills")),
             ]
-            for cand in candidates:
-                if os.path.exists(cand):
-                    mounted_skill_dir = cand
-                    break
+            for cand_root in allowed_candidate_roots:
+                candidate = os.path.realpath(os.path.join(cand_root, clean_skill))
+                try:
+                    if os.path.commonpath([cand_root, candidate]) == cand_root and os.path.exists(candidate):
+                        mounted_skill_dir = candidate
+                        break
+                except ValueError:
+                    pass
 
         if not mounted_skill_dir or not os.path.exists(mounted_skill_dir):
-            raise AgentRunnerError(f"Skill '{skill_name}' could not be located in sandbox or system.")
+            raise AgentRunnerError(f"Skill '{clean_skill}' could not be located in sandbox or system.")
 
         skill_md_path = os.path.join(mounted_skill_dir, "SKILL.md")
         if not os.path.exists(skill_md_path):

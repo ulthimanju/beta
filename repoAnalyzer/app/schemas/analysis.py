@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+SKILL_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 
 def validate_safe_session_id(v: str) -> str:
@@ -12,6 +13,14 @@ def validate_safe_session_id(v: str) -> str:
     clean = (v or "").strip()
     if not clean or not SESSION_ID_REGEX.match(clean) or ".." in clean or "/" in clean or "\\" in clean:
         raise ValueError("Invalid session ID format. Path traversal characters are strictly forbidden.")
+    return clean
+
+
+def validate_safe_skill_name(v: str) -> str:
+    """Validate that skill_name contains only alphanumeric characters, dashes, and underscores without traversal."""
+    clean = (v or "").strip()
+    if not clean or not SKILL_NAME_REGEX.match(clean) or ".." in clean or "/" in clean or "\\" in clean:
+        raise ValueError("Invalid skill name format. Path traversal characters are strictly forbidden.")
     return clean
 
 
@@ -231,6 +240,11 @@ class LoadSkillRequest(BaseModel):
     @classmethod
     def validate_session(cls, v: str) -> str:
         return validate_safe_session_id(v)
+
+    @field_validator("skill_name")
+    @classmethod
+    def validate_skill(cls, v: str) -> str:
+        return validate_safe_skill_name(v)
 
 
 class LoadSkillResponse(BaseModel):

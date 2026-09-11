@@ -27,6 +27,22 @@ def validate_session_id_security(session_id: str) -> str:
     return clean
 
 
+SKILL_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_skill_name_security(skill_name: str) -> str:
+    """
+    Strictly validates skill_name to prevent directory traversal and injection.
+    Only alphanumeric characters, dashes, and underscores up to 64 chars are permitted.
+    """
+    clean = (skill_name or "").strip()
+    if not clean or not SKILL_NAME_REGEX.match(clean) or ".." in clean or "/" in clean or "\\" in clean:
+        raise SandboxError(
+            f"Security violation: Invalid skill name format '{skill_name}'. Path traversal characters detected."
+        )
+    return clean
+
+
 class SandboxError(Exception):
     """Base exception for sandbox errors."""
     pass
@@ -81,36 +97,53 @@ class SessionSandbox:
 
     def mount_skill(self, skill_name: str = "repo-analyzer") -> Optional[str]:
         """Ensure skill is mounted/accessible inside the sandbox workspace for the CLI AI agent."""
-        global_skill_path = os.path.expanduser(f"~/.agents/skills/{skill_name}")
-        local_skill_path = os.path.join(os.getcwd(), ".agents", "skills", skill_name)
+        clean_skill = validate_skill_name_security(skill_name)
+        real_root = os.path.realpath(self.root_dir)
+
+        # Base directories for global and project skills
+        allowed_skill_roots = [
+            os.path.realpath(os.path.expanduser("~/.agents/skills")),
+            os.path.realpath(os.path.join(os.getcwd(), ".agents", "skills")),
+        ]
 
         src = None
-        if os.path.exists(global_skill_path):
-            src = global_skill_path
-        elif os.path.exists(local_skill_path):
-            src = local_skill_path
+        for root in allowed_skill_roots:
+            candidate = os.path.realpath(os.path.join(root, clean_skill))
+            try:
+                if os.path.commonpath([root, candidate]) == root and os.path.exists(candidate):
+                    src = candidate
+                    break
+            except ValueError:
+                pass
 
         if src and os.path.exists(src):
-            sandbox_skills_dir = os.path.join(self.root_dir, ".agents", "skills")
+            sandbox_skills_dir = os.path.join(real_root, ".agents", "skills")
             os.makedirs(sandbox_skills_dir, exist_ok=True)
-            target_skill_dir = os.path.join(sandbox_skills_dir, skill_name)
+            target_skill_dir = os.path.realpath(os.path.join(sandbox_skills_dir, clean_skill))
+
+            # Enforce sandbox containment on destination
+            if os.path.commonpath([real_root, target_skill_dir]) != real_root:
+                raise SandboxError("Security violation: Skill target directory escapes sandbox root.")
+
             if not os.path.exists(target_skill_dir):
                 try:
                     shutil.copytree(src, target_skill_dir, dirs_exist_ok=True)
-                    logger.info("Mounted skill into sandbox", skill=skill_name, target=target_skill_dir)
+                    logger.info("Mounted skill into sandbox", skill=clean_skill, target=target_skill_dir)
                 except Exception as e:
                     logger.warning("Failed to copy skill to sandbox", error=str(e))
 
             # Also mount into repo working directory if cloned
             if self.repo_dir and os.path.exists(self.repo_dir):
-                repo_skills_dir = os.path.join(self.repo_dir, ".agents", "skills")
-                os.makedirs(repo_skills_dir, exist_ok=True)
-                repo_skill_target = os.path.join(repo_skills_dir, skill_name)
-                if not os.path.exists(repo_skill_target):
-                    try:
-                        shutil.copytree(src, repo_skill_target, dirs_exist_ok=True)
-                    except Exception:
-                        pass
+                real_repo = os.path.realpath(self.repo_dir)
+                if os.path.commonpath([real_root, real_repo]) == real_root:
+                    repo_skills_dir = os.path.join(real_repo, ".agents", "skills")
+                    os.makedirs(repo_skills_dir, exist_ok=True)
+                    repo_skill_target = os.path.realpath(os.path.join(repo_skills_dir, clean_skill))
+                    if os.path.commonpath([real_root, repo_skill_target]) == real_root and not os.path.exists(repo_skill_target):
+                        try:
+                            shutil.copytree(src, repo_skill_target, dirs_exist_ok=True)
+                        except Exception:
+                            pass
 
             return target_skill_dir
         return None

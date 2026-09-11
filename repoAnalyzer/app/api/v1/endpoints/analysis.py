@@ -338,8 +338,9 @@ async def load_skill_endpoint(payload: LoadSkillRequest) -> LoadSkillResponse:
         )
     except AgentRunnerError as e:
         logger.error("Step 6 failed to load skill", session_id=session_id, error=str(e))
+        is_security = "Security violation" in str(e)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_400_BAD_REQUEST if is_security else status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Step 6 Failed: {str(e)}",
         )
 
