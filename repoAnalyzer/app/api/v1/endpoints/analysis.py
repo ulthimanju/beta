@@ -411,7 +411,7 @@ async def generate_report_endpoint(payload: GenerateReportRequest) -> GenerateRe
         session_id=session_id,
         repo_name=result["repo_name"],
         schema_valid=result["schema_valid"],
-        schema_json=result["schema_json"],
+        report_schema=result["schema_json"],
         frontend_report=result["frontend_report"],
         status="generated",
         step=8,

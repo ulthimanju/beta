@@ -256,7 +256,7 @@ class GenerateReportResponse(BaseModel):
     session_id: str
     repo_name: str
     schema_valid: bool
-    schema_json: dict[str, Any]
+    report_schema: dict[str, Any]
     frontend_report: dict[str, Any]
     status: str = "generated"
     step: int = 8
