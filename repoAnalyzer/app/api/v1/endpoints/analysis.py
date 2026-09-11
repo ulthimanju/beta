@@ -17,6 +17,8 @@ from app.schemas.analysis import (
     DispatchQueryResponse,
     LoadSkillRequest,
     LoadSkillResponse,
+    PerformAnalysisRequest,
+    PerformAnalysisResponse,
     SandboxCloseResponse,
     SandboxStatsResponse,
 )
@@ -333,6 +335,51 @@ async def load_skill_endpoint(payload: LoadSkillRequest) -> LoadSkillResponse:
         step_title="Load Skill",
         duration_ms=result["duration_ms"],
         message=f"Step 6 Successful: AI agent loaded '{result['skill_name']}' skill ({len(result['pillars_loaded'])} pillars, {result['total_rules_count']} rules). Output schema verified.",
+    )
+
+
+@router.post(
+    "/perform-analysis",
+    response_model=PerformAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    tags=["Analysis Pipeline"],
+    summary="Step 7: Perform deep repository analysis",
+    description="The AI agent audits the repository across the 4 pillars (Architecture, Ideology, Methodology, Software Principles) per repo-analyzer specifications.",
+)
+async def perform_analysis_endpoint(payload: PerformAnalysisRequest) -> PerformAnalysisResponse:
+    """Execute Step 7 of the analysis pipeline."""
+    session_id = payload.session_id
+    logger.info("Step 7: Performing repository analysis", session_id=session_id)
+
+    try:
+        result = await agent_runner.perform_analysis(session_id=session_id)
+    except AgentRunnerError as e:
+        logger.error("Step 7 failed during repository analysis", session_id=session_id, error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Step 7 Failed: {str(e)}",
+        )
+
+    return PerformAnalysisResponse(
+        session_id=session_id,
+        repo_name=result["repo_name"],
+        working_dir=result["working_dir"],
+        primary_language=result["primary_language"],
+        secondary_languages=result["secondary_languages"],
+        detected_architecture=result["detected_architecture"],
+        overall_score=result["overall_score"],
+        grade=result["grade"],
+        pillar_scores=result["pillar_scores"],
+        total_rules_evaluated=result["total_rules_evaluated"],
+        passed_rules_count=result["passed_rules_count"],
+        failed_rules_count=result["failed_rules_count"],
+        executive_summary=result["executive_summary"],
+        pillars=result["pillars"],
+        status="analyzed",
+        step=7,
+        step_title="Perform Repository Analysis",
+        duration_ms=result["duration_ms"],
+        message=f"Step 7 Successful: Codebase analysis complete. Overall Score: {result['overall_score']}/100 (Grade: {result['grade']}). 34 checklist rules evaluated across 4 pillars.",
     )
 
 

@@ -10,6 +10,7 @@ from typing import Any, Optional
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager
+from app.services.repo_inspector import repo_inspector
 
 
 logger = get_logger("agent_runner")
@@ -317,6 +318,80 @@ class AgentRunner:
             "schema_title": schema_title,
             "duration_ms": duration_ms,
             "status": "loaded",
+        }
+
+    async def perform_analysis(self, session_id: str) -> dict[str, Any]:
+        """
+        Step 7: The AI agent analyzes the repository according to the instructions
+        defined in the repo-analyzer skill and its configuration.
+        Executes deep codebase inspection across the 4 pillars.
+        """
+        start_time = time.perf_counter()
+
+        sandbox = sandbox_manager.get_sandbox(session_id)
+        if not sandbox:
+            raise AgentRunnerError(f"Session sandbox '{session_id}' not found or already closed.")
+
+        working_dir = sandbox.get_working_directory()
+        if not os.path.exists(working_dir):
+            raise AgentRunnerError(f"Working directory does not exist: '{working_dir}'")
+
+        # Ensure skill is loaded
+        if not getattr(sandbox, "skill_loaded", False):
+            await self.load_skill(session_id, "repo-analyzer")
+
+        # Run codebase inspection across 4 pillars
+        inspection = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
+
+        # Compute rules summary
+        total_rules = 0
+        passed_rules = 0
+        pillar_scores: dict[str, int] = {}
+
+        for p in inspection["pillars"]:
+            pillar_scores[p["title"]] = p["score"]
+            for item in p["checklist"]:
+                total_rules += 1
+                if item["passed"]:
+                    passed_rules += 1
+
+        failed_rules = total_rules - passed_rules
+        repo_name = getattr(sandbox, "repo_name", os.path.basename(working_dir))
+
+        # Store results in sandbox
+        setattr(sandbox, "analysis_result", inspection)
+        setattr(sandbox, "analysis_completed", True)
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        logger.info(
+            "Step 7: Repository analysis complete",
+            session_id=session_id,
+            repo_name=repo_name,
+            overall_score=inspection["overall_score"],
+            grade=inspection["grade"],
+            total_rules=total_rules,
+            passed_rules=passed_rules,
+            duration_ms=duration_ms,
+        )
+
+        return {
+            "session_id": session_id,
+            "repo_name": repo_name,
+            "working_dir": working_dir,
+            "primary_language": inspection["primary_language"],
+            "secondary_languages": inspection["secondary_languages"],
+            "detected_architecture": inspection["primary_architecture_pattern"],
+            "overall_score": inspection["overall_score"],
+            "grade": inspection["grade"],
+            "pillar_scores": pillar_scores,
+            "total_rules_evaluated": total_rules,
+            "passed_rules_count": passed_rules,
+            "failed_rules_count": failed_rules,
+            "executive_summary": inspection["executive_summary"],
+            "pillars": inspection["pillars"],
+            "status": "analyzed",
+            "duration_ms": duration_ms,
         }
 
 

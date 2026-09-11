@@ -91,6 +91,33 @@ interface Step6SkillInfo {
   status: string;
 }
 
+interface PillarScoreItem {
+  title: string;
+  score: number;
+  status: "exceptional" | "good" | "needs-attention" | "critical";
+  summary: string;
+  keyStrengths: string[];
+  antiPatterns: string[];
+  checklist: { label: string; passed: boolean; note: string }[];
+}
+
+interface Step7AnalysisInfo {
+  repoName: string;
+  primaryLanguage: string;
+  secondaryLanguages: string[];
+  detectedArchitecture: string;
+  overallScore: number;
+  grade: string;
+  pillarScores: Record<string, number>;
+  totalRulesEvaluated: number;
+  passedRulesCount: number;
+  failedRulesCount: number;
+  executiveSummary: string;
+  pillars: PillarScoreItem[];
+  durationMs: number;
+  status: string;
+}
+
 
 
 
@@ -111,6 +138,7 @@ export function App() {
   const [step4AgentInfo, setStep4AgentInfo] = useState<Step4AgentInfo | null>(null);
   const [step5QueryInfo, setStep5QueryInfo] = useState<Step5QueryInfo | null>(null);
   const [step6SkillInfo, setStep6SkillInfo] = useState<Step6SkillInfo | null>(null);
+  const [step7AnalysisInfo, setStep7AnalysisInfo] = useState<Step7AnalysisInfo | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Sync dark class on HTML root
@@ -143,6 +171,7 @@ export function App() {
     setStep4AgentInfo(null);
     setStep5QueryInfo(null);
     setStep6SkillInfo(null);
+    setStep7AnalysisInfo(null);
     setLogs([]);
 
     // Initialize all steps to idle
@@ -554,6 +583,84 @@ export function App() {
       setSteps((prev) =>
         prev.map((s, i) => (i === 5 ? { ...s, status: "completed" } : s))
       );
+
+      // ==========================================
+      // STEP 7: Perform Repository Analysis
+      // ==========================================
+      setCurrentStepIndex(6);
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 6 ? { ...s, status: "running" } : s))
+      );
+
+      addLog("system", `[Step 7/8] Commencing deep repository analysis across 4 evaluation pillars...`);
+      addLog("system", `[Step 7/8] Evaluating Architecture, Ideology, Methodology, Software Principles...`);
+
+      let analysisRes = await fetch("/api/v1/perform-analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          deep_scan: true,
+        }),
+      }).catch(() => null);
+
+      if (!analysisRes || !analysisRes.ok) {
+        if (!analysisRes || analysisRes.status === 404 || analysisRes.status === 502) {
+          const directAnalysis = await fetch("http://localhost:8000/api/v1/perform-analysis", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              deep_scan: true,
+            }),
+          }).catch(() => null);
+          if (directAnalysis) analysisRes = directAnalysis;
+        }
+      }
+
+      if (!analysisRes) {
+        throw new Error("Unable to reach backend /api/v1/perform-analysis endpoint");
+      }
+
+      const analysisData = await analysisRes.json();
+
+      if (!analysisRes.ok) {
+        const errDetail = analysisData.detail || `Repository analysis failed with status ${analysisRes.status}`;
+        throw new Error(errDetail);
+      }
+
+      addLog("info", `[Step 7/8] Primary Pattern: ${analysisData.detected_architecture} (${analysisData.primary_language})`);
+      addLog("info", `[Step 7/8] Overall Score: ${analysisData.overall_score}/100 — Grade ${analysisData.grade}`);
+      addLog("info", `[Step 7/8] Checklist Outcomes: ${analysisData.passed_rules_count}/${analysisData.total_rules_evaluated} criteria passed`);
+      if (analysisData.pillar_scores) {
+        for (const [pillarName, score] of Object.entries(analysisData.pillar_scores)) {
+          addLog("info", `[Step 7/8] • ${pillarName}: ${score}/100`);
+        }
+      }
+      addLog("agent", `[Step 7/8] Step 7 Complete: Deep repository analysis finished. All 4 pillars audited.`);
+      addLog("system", `[Info] Step 7 prototype complete. Ready for Step 8 (Format & Generate Output).`);
+
+      setStep7AnalysisInfo({
+        repoName: analysisData.repo_name,
+        primaryLanguage: analysisData.primary_language,
+        secondaryLanguages: analysisData.secondary_languages || [],
+        detectedArchitecture: analysisData.detected_architecture,
+        overallScore: analysisData.overall_score,
+        grade: analysisData.grade,
+        pillarScores: analysisData.pillar_scores || {},
+        totalRulesEvaluated: analysisData.total_rules_evaluated,
+        passedRulesCount: analysisData.passed_rules_count,
+        failedRulesCount: analysisData.failed_rules_count,
+        executiveSummary: analysisData.executive_summary,
+        pillars: analysisData.pillars || [],
+        durationMs: analysisData.duration_ms,
+        status: analysisData.status,
+      });
+
+      // Mark Step 7 completed
+      setSteps((prev) =>
+        prev.map((s, i) => (i === 6 ? { ...s, status: "completed" } : s))
+      );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
     } catch (err: unknown) {
@@ -582,6 +689,7 @@ export function App() {
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
       setStep6SkillInfo(null);
+      setStep7AnalysisInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
       setReport(null);
@@ -593,6 +701,7 @@ export function App() {
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
       setStep6SkillInfo(null);
+      setStep7AnalysisInfo(null);
       setSteps(INITIAL_WORKFLOW_STEPS);
       setCurrentStepIndex(-1);
     } finally {
@@ -615,6 +724,7 @@ export function App() {
       setStep4AgentInfo(null);
       setStep5QueryInfo(null);
       setStep6SkillInfo(null);
+      setStep7AnalysisInfo(null);
       setErrorMessage(null);
     }
   };
@@ -889,6 +999,102 @@ export function App() {
                       </p>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Step 7: Perform Repository Analysis Card & Scorecard */}
+            {step7AnalysisInfo && (
+              <div className="rounded-xl border border-primary/30 bg-card p-5 shadow-xs flex flex-col gap-4">
+                {/* Header Banner */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/20 text-primary font-mono text-xl font-bold">
+                      {step7AnalysisInfo.grade}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span>Step 7: Repository Analysis Complete</span>
+                        </span>
+                        <span className="text-xs font-mono text-muted-foreground">
+                          {step7AnalysisInfo.durationMs}ms
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-foreground mt-0.5">
+                        Overall Score: {step7AnalysisInfo.overallScore}/100 &middot; Pattern: {step7AnalysisInfo.detectedArchitecture}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1 text-xs font-mono text-foreground border border-border">
+                      <span className="text-muted-foreground">Language:</span>
+                      <span className="font-semibold">{step7AnalysisInfo.primaryLanguage}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-2.5 py-1 text-xs font-mono text-primary border border-primary/25">
+                      <span>{step7AnalysisInfo.passedRulesCount}/{step7AnalysisInfo.totalRulesEvaluated} criteria passed</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4 Pillars Scorecards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {step7AnalysisInfo.pillars.map((pillar) => {
+                    const statusColor =
+                      pillar.status === "exceptional"
+                        ? "text-emerald-500 bg-emerald-500/10 border-emerald-500/30"
+                        : pillar.status === "good"
+                        ? "text-primary bg-primary/10 border-primary/30"
+                        : pillar.status === "needs-attention"
+                        ? "text-amber-500 bg-amber-500/10 border-amber-500/30"
+                        : "text-rose-500 bg-rose-500/10 border-rose-500/30";
+
+                    const passedCount = pillar.checklist.filter((c) => c.passed).length;
+
+                    return (
+                      <div
+                        key={pillar.title}
+                        className="rounded-xl border border-border bg-card/60 p-3.5 shadow-2xs flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-2">
+                            <span className="font-semibold text-sm text-foreground">{pillar.title}</span>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-mono font-bold border ${statusColor}`}>
+                              {pillar.score}/100
+                            </span>
+                          </div>
+
+                          <div className="w-full bg-muted rounded-full h-1.5 mb-2 overflow-hidden">
+                            <div
+                              className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                              style={{ width: `${pillar.score}%` }}
+                            />
+                          </div>
+
+                          <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                            {pillar.summary}
+                          </p>
+                        </div>
+
+                        <div className="pt-2 border-t border-border/50 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                          <span>{passedCount}/{pillar.checklist.length} rules passed</span>
+                          <span className="capitalize">{pillar.status}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Executive Summary Preview */}
+                <div className="rounded-xl border border-border bg-muted/30 p-3.5 text-xs">
+                  <span className="font-bold text-foreground uppercase tracking-wider text-[10px] block mb-1">
+                    Executive Appraisal Summary
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
+                    {step7AnalysisInfo.executiveSummary}
+                  </p>
                 </div>
               </div>
             )}

@@ -199,4 +199,52 @@ class LoadSkillResponse(BaseModel):
     message: str
 
 
+class ChecklistItemResult(BaseModel):
+    """Individual checklist item outcome from evaluation."""
+    label: str
+    passed: bool
+    note: str
+
+
+class PillarAnalysisData(BaseModel):
+    """Full analysis outcome for a single pillar."""
+    title: str
+    score: int
+    status: str
+    summary: str
+    keyStrengths: list[str]
+    antiPatterns: list[str]
+    checklist: list[ChecklistItemResult]
+
+
+class PerformAnalysisRequest(BaseModel):
+    """Schema for Step 7: Performing repository analysis using repo-analyzer skill."""
+    session_id: str = Field(..., description="Unique session ID from previous steps")
+    deep_scan: bool = Field(default=True, description="Execute full codebase inspection")
+
+
+class PerformAnalysisResponse(BaseModel):
+    """Schema for response when repository analysis is performed (Step 7)."""
+    session_id: str
+    repo_name: str
+    working_dir: str
+    primary_language: str
+    secondary_languages: list[str]
+    detected_architecture: str
+    overall_score: int
+    grade: str
+    pillar_scores: dict[str, int]
+    total_rules_evaluated: int
+    passed_rules_count: int
+    failed_rules_count: int
+    executive_summary: str
+    pillars: list[PillarAnalysisData]
+    status: str = "analyzed"
+    step: int = 7
+    step_title: str = "Perform Repository Analysis"
+    duration_ms: float
+    message: str
+
+
+
 
