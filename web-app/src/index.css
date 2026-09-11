@@ -1,87 +1,112 @@
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @import "tailwindcss";
-@import "tw-animate-css"; /* or "tailwindcss-animate" if using the classic plugin */
+@import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  /* ---- Light theme — matches zinc-50/white surfaces from the uploaded file ---- */
-  --background: oklch(0.985 0 0);              /* zinc-50 */
-  --foreground: oklch(0.37 0.013 285.8);        /* zinc-700 */
+  /* ==========================================================================
+     Warm Soft UI / Modern Neumorphism & Tactile Minimalism Design System
+     8-Point Grid Foundation (Multiples of 8px: 8, 16, 24, 32, 40, 48, 56, 64)
+     ========================================================================== */
 
-  --card: oklch(1 0 0);                         /* white */
-  --card-foreground: oklch(0.37 0.013 285.8);
+  /* Base Warm Editorial Canvas */
+  --bg-card: #eadcd0;
+  --bg-gradient-top: #eadcd0;
+  --bg-gradient-mid: #f5eae1;
+  --bg-gradient-bottom: #eedfd5;
 
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 285.9); /* zinc-900 */
+  /* Elevated Surfaces */
+  --surface-white: #fdfaf8;
+  --surface-bio: #fcf9f6;
 
-  --primary: oklch(0.715 0.143 215.2);          /* cyan-500 */
-  --primary-foreground: oklch(0.985 0 0);
+  /* Text Hierarchy */
+  --text-primary: #12100f;       /* Deep warm charcoal */
+  --text-secondary: #746d67;     /* Muted warm grey */
+  --text-bio-label: #9a918a;     /* Soft label tone */
 
-  --secondary: oklch(0.967 0.001 286.4);        /* zinc-100 */
-  --secondary-foreground: oklch(0.21 0.006 285.9);
+  /* Status Accents */
+  --status-active: #2ecc71;      /* Vibrant glowing emerald */
+  --status-grey: #8d8a86;        /* Muted inactive dot */
+  --status-ring: #ebdcd1;        /* Cutout ring matching background */
 
-  --muted: oklch(0.967 0.001 286.4);            /* zinc-100 */
-  --muted-foreground: oklch(0.552 0.014 285.9);  /* zinc-500 */
+  /* Theme Tokens mapped for Tailwind */
+  --background: #f7f2ed;
+  --foreground: #12100f;
 
-  --accent: oklch(0.768 0.192 130.9);           /* lime-500 */
-  --accent-foreground: oklch(0.21 0.006 285.9);
+  --card: #fdfaf8;
+  --card-foreground: #12100f;
 
-  --destructive: oklch(0.577 0.245 27.3);       /* red-500 */
-  --destructive-foreground: oklch(0.985 0 0);
+  --popover: #fdfaf8;
+  --popover-foreground: #12100f;
 
-  --border: oklch(0.92 0.004 286.3);            /* zinc-200 */
-  --input: oklch(0.92 0.004 286.3);
-  --ring: oklch(0.715 0.143 215.2);             /* cyan-500 */
+  --primary: #c85a2b;            /* Warm terracotta / burnt copper */
+  --primary-foreground: #ffffff;
 
-  --chart-1: oklch(0.715 0.143 215.2);          /* cyan-500 */
-  --chart-2: oklch(0.768 0.192 130.9);          /* lime-500 */
-  --chart-3: oklch(0.552 0.014 285.9);          /* zinc-500 */
-  --chart-4: oklch(0.577 0.245 27.3);           /* red-500 */
-  --chart-5: oklch(0.37 0.013 285.8);           /* zinc-700 */
+  --secondary: #eedfd5;          /* Warm oatmeal cream */
+  --secondary-foreground: #12100f;
 
-  --radius: 0.5rem;
+  --muted: #f3e9e1;              /* Soft oatmeal blush */
+  --muted-foreground: #746d67;
 
-  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  --accent: #2ecc71;             /* Radiant emerald accent */
+  --accent-foreground: #ffffff;
+
+  --destructive: #d93829;        /* Warm crimson */
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(185, 160, 148, 0.32);
+  --input: rgba(185, 160, 148, 0.35);
+  --ring: #c85a2b;
+
+  --chart-1: #c85a2b;
+  --chart-2: #2ecc71;
+  --chart-3: #8d8a86;
+  --chart-4: #d93829;
+  --chart-5: #12100f;
+
+  --radius: 1.5rem; /* 24px (multiple of 8) */
+
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 }
 
 .dark {
-  /* ---- Dark theme — matches zinc-950/zinc-900 surfaces + cyan-400/lime-400 accents ---- */
-  --background: oklch(0.141 0.005 285.8);       /* zinc-950 */
-  --foreground: oklch(0.871 0.006 286.3);       /* zinc-300 */
+  /* Tactile Dark Neumorphism */
+  --background: #151312;
+  --foreground: #f6eee7;
 
-  --card: oklch(0.21 0.006 285.9);              /* zinc-900 */
-  --card-foreground: oklch(0.871 0.006 286.3);
+  --card: #201c1a;
+  --card-foreground: #f6eee7;
 
-  --popover: oklch(0.18 0.005 285.9);           /* elevated surface, between zinc-900/950 */
-  --popover-foreground: oklch(0.985 0 0);       /* white */
+  --popover: #27221f;
+  --popover-foreground: #f6eee7;
 
-  --primary: oklch(0.789 0.135 214.6);          /* cyan-400 */
-  --primary-foreground: oklch(0.141 0.005 285.8); /* zinc-950 */
+  --primary: #e07342;
+  --primary-foreground: #151312;
 
-  --secondary: oklch(0.274 0.006 286.0);        /* zinc-800 */
-  --secondary-foreground: oklch(0.871 0.006 286.3);
+  --secondary: #2b2522;
+  --secondary-foreground: #f6eee7;
 
-  --muted: oklch(0.274 0.006 286.0);            /* zinc-800 */
-  --muted-foreground: oklch(0.705 0.015 286.1);  /* zinc-400 */
+  --muted: #27221f;
+  --muted-foreground: #9a918a;
 
-  --accent: oklch(0.841 0.196 128.6);           /* lime-400 */
-  --accent-foreground: oklch(0.141 0.005 285.8); /* zinc-950 */
+  --accent: #34d399;
+  --accent-foreground: #151312;
 
-  --destructive: oklch(0.637 0.237 25.3);       /* red-400 */
-  --destructive-foreground: oklch(0.985 0 0);
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
 
-  --border: oklch(0.274 0.006 286.0);           /* zinc-800 */
-  --input: oklch(0.274 0.006 286.0);
-  --ring: oklch(0.789 0.135 214.6);             /* cyan-400 */
+  --border: rgba(120, 105, 95, 0.3);
+  --input: rgba(120, 105, 95, 0.35);
+  --ring: #e07342;
 
-  --chart-1: oklch(0.789 0.135 214.6);          /* cyan-400 */
-  --chart-2: oklch(0.841 0.196 128.6);          /* lime-400 */
-  --chart-3: oklch(0.705 0.015 286.1);          /* zinc-400 */
-  --chart-4: oklch(0.637 0.237 25.3);           /* red-400 */
-  --chart-5: oklch(0.871 0.006 286.3);          /* zinc-300 */
+  --chart-1: #e07342;
+  --chart-2: #34d399;
+  --chart-3: #9a918a;
+  --chart-4: #ef4444;
+  --chart-5: #f6eee7;
 }
 
 @theme inline {
@@ -110,13 +135,150 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
+}
+
+/* ==========================================================================
+   Neumorphic Dual-Lighting Shadow Formulas & 8-Point Tactile Utilities
+   ========================================================================== */
+
+/* Soft Pill / Circular Button */
+.soft-btn {
+  background: var(--surface-white);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 
+    0 6px 18px rgba(175, 150, 138, 0.25),
+    0 1px 3px rgba(175, 150, 138, 0.1),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 1),
+    inset 0 -1.5px 2px rgba(185, 160, 148, 0.16);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.soft-btn:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+  box-shadow: 
+    0 8px 24px rgba(175, 150, 138, 0.32),
+    0 2px 5px rgba(175, 150, 138, 0.14),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 1),
+    inset 0 -1.5px 2px rgba(185, 160, 148, 0.16);
+}
+
+.soft-btn:active:not(:disabled) {
+  transform: scale(0.96);
+  box-shadow: 
+    0 2px 6px rgba(175, 150, 138, 0.2),
+    inset 0 2px 4px rgba(140, 115, 102, 0.18),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.7);
+}
+
+/* Dark variant for soft buttons */
+.dark .soft-btn {
+  background: #24201d;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 
+    0 6px 18px rgba(0, 0, 0, 0.45),
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.1),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.4);
+}
+
+.dark .soft-btn:hover:not(:disabled) {
+  box-shadow: 
+    0 8px 24px rgba(0, 0, 0, 0.6),
+    0 2px 5px rgba(0, 0, 0, 0.4),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.14),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.4);
+}
+
+.dark .soft-btn:active:not(:disabled) {
+  box-shadow: 
+    0 2px 6px rgba(0, 0, 0, 0.5),
+    inset 0 2px 4px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* Primary Vibrant Soft Pill Button */
+.soft-btn-primary {
+  background: linear-gradient(145deg, #d86433 0%, #b84f22 100%);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 
+    0 8px 20px rgba(200, 90, 43, 0.35),
+    0 2px 4px rgba(200, 90, 43, 0.2),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.5),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.soft-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1.5px);
+  box-shadow: 
+    0 12px 28px rgba(200, 90, 43, 0.45),
+    0 3px 6px rgba(200, 90, 43, 0.25),
+    inset 0 1.5px 1.5px rgba(255, 255, 255, 0.6),
+    inset 0 -1.5px 2px rgba(0, 0, 0, 0.2);
+}
+
+.soft-btn-primary:active:not(:disabled) {
+  transform: scale(0.96);
+  box-shadow: 
+    0 3px 8px rgba(200, 90, 43, 0.3),
+    inset 0 2px 4px rgba(0, 0, 0, 0.3),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.3);
+}
+
+/* Elevated Tactile Card */
+.soft-card {
+  background: var(--surface-white);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 
+    0 12px 32px rgba(175, 150, 138, 0.18),
+    0 2px 8px rgba(175, 150, 138, 0.08),
+    inset 0 1px 1.5px rgba(255, 255, 255, 1);
+}
+
+.dark .soft-card {
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 
+    0 12px 32px rgba(0, 0, 0, 0.5),
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* Inset / Recessed Soft Well (for inputs and terminal viewports) */
+.soft-inset {
+  background: var(--surface-bio);
+  border: 1px solid rgba(185, 160, 148, 0.35);
+  box-shadow: 
+    inset 0 2px 5px rgba(175, 150, 138, 0.22),
+    inset 0 -1px 2px rgba(255, 255, 255, 0.9);
+}
+
+.dark .soft-inset {
+  background: #171513;
+  border: 1px solid rgba(120, 105, 95, 0.3);
+  box-shadow: 
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.04);
+}
+
+/* Glassmorphic Floating Header / Panel */
+.glass-header {
+  background: rgba(253, 250, 248, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(185, 160, 148, 0.25);
+  box-shadow: 0 4px 20px rgba(175, 150, 138, 0.08);
+}
+
+.dark .glass-header {
+  background: rgba(21, 19, 18, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(120, 105, 95, 0.25);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
 @layer base {
@@ -126,6 +288,15 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    background-image: 
+      radial-gradient(circle at 10% 10%, rgba(234, 220, 208, 0.4) 0%, transparent 40%),
+      radial-gradient(circle at 90% 90%, rgba(245, 234, 225, 0.5) 0%, transparent 40%);
+    background-attachment: fixed;
+  }
+  .dark body {
+    background-image: 
+      radial-gradient(circle at 10% 10%, rgba(35, 30, 26, 0.5) 0%, transparent 40%),
+      radial-gradient(circle at 90% 90%, rgba(25, 22, 20, 0.6) 0%, transparent 40%);
   }
   code, pre, kbd {
     font-family: var(--font-mono);

@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   FolderGit2,
   FolderCheck,
-  Layers,
   Bot,
   Cpu,
   Send,
@@ -724,7 +723,7 @@ export function App() {
       addLog("warn", `[Pipeline Failure] ${msg}`);
       setErrorMessage(msg);
       setSteps((prev) =>
-        prev.map((s, i) => (s.status === "running" ? { ...s, status: "failed" } : s))
+        prev.map((s) => (s.status === "running" ? { ...s, status: "failed" } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -789,7 +788,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans transition-colors selection:bg-primary/20 selection:text-primary">
-      {/* Navigation */}
+      {/* Navigation - h-16 (64px) */}
       <Navbar
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
@@ -798,34 +797,35 @@ export function App() {
         hasResult={step1Session !== null || report !== null}
       />
 
-      {/* Main Container */}
-      <main className="flex-1 container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6">
+      {/* Main Container - 8-point: px-6 (24px) / lg:px-8 (32px), py-8 (32px), space-y-8 (32px) */}
+      <main className="flex-1 container mx-auto max-w-7xl px-6 lg:px-8 py-8 space-y-8">
         {/* Repo Input Bar & 4 Pillar Badges */}
         <RepoInputSection
           onStartAnalysis={handleStartAnalysis}
           isAnalyzing={isAnalyzing}
         />
 
-        {/* Error Alert */}
+        {/* Error Alert - 8-point: p-6 (24px), gap-4 (16px), rounded-3xl */}
         {errorMessage && (
-          <div className="mx-auto max-w-5xl my-4 flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="mx-auto max-w-5xl my-8 flex items-start gap-4 rounded-3xl soft-card border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
+            <AlertCircle className="h-6 w-6 shrink-0 mt-0.5" strokeWidth={2.1} />
             <div>
-              <strong className="font-semibold block">Execution Error</strong>
-              <span>{errorMessage}</span>
+              <strong className="font-bold text-base block mb-1">Execution Error</strong>
+              <span className="leading-relaxed">{errorMessage}</span>
             </div>
           </div>
         )}
 
         {/* Step 1, Step 2, Step 3 & Step 4 Status Cards */}
         {step1Session && (
-          <div className="mx-auto max-w-5xl my-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Step 1 Card */}
-              <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
-                    <CheckCircle2 className="h-5 w-5" />
+          <div className="mx-auto max-w-5xl my-8 space-y-6">
+            {/* Step 1-4 Grid - 8-point: gap-4 (16px) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Step 1 Card - 8-point: p-6 (24px), rounded-3xl */}
+              <div className="rounded-3xl soft-card p-6 flex flex-col justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-accent shrink-0">
+                    <CheckCircle2 className="h-5 w-5" strokeWidth={2.1} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -836,73 +836,73 @@ export function App() {
                         {step1Session.sessionId.slice(0, 8)}...
                       </span>
                     </div>
-                    <h3 className="text-xs font-semibold text-foreground truncate mt-0.5" title={`${step1Session.owner}/${step1Session.repoName}`}>
+                    <h3 className="text-xs font-bold text-foreground truncate mt-1" title={`${step1Session.owner}/${step1Session.repoName}`}>
                       {step1Session.owner}/{step1Session.repoName}
                     </h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Verified Public Repo</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Verified Public Repo</p>
                   </div>
                 </div>
               </div>
 
-              {/* Step 2 Card with Session Sandbox Details */}
+              {/* Step 2 Card with Session Sandbox Details - 8-point: p-6 (24px), rounded-3xl */}
               {step2CloneInfo ? (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0 mt-0.5">
-                      <Box className="h-5 w-5" />
+                <div className="rounded-3xl soft-card p-6 flex flex-col justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-primary shrink-0">
+                      <Box className="h-5 w-5" strokeWidth={2.1} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                          <ShieldCheck className="h-3.5 w-3.5" />
+                          <ShieldCheck className="h-4 w-4" strokeWidth={2.1} />
                           <span>Step 2</span>
                         </span>
                         <span className="font-mono text-[11px] text-muted-foreground">
                           {step2CloneInfo.durationMs}ms
                         </span>
                       </div>
-                      <p className="text-xs font-mono text-foreground truncate mt-1" title={step2CloneInfo.sandboxRoot}>
+                      <p className="text-xs font-mono font-bold text-foreground truncate mt-1" title={step2CloneInfo.sandboxRoot}>
                         Sandbox Cloned
                       </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                      <p className="text-[11px] text-muted-foreground mt-1">
                         {step2CloneInfo.fileCount} files &middot; {step2CloneInfo.branch}
                       </p>
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
-                  <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
+                <div className="rounded-3xl soft-inset p-6 flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-primary animate-pulse mr-2" />
                   <span>Cloning into sandbox...</span>
                 </div>
               )}
 
-              {/* Step 3 Card: Active Working Directory */}
+              {/* Step 3 Card: Active Working Directory - 8-point: p-6 (24px), rounded-3xl */}
               {step3WorkingDirInfo ? (
-                <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0 mt-0.5">
-                      <FolderGit2 className="h-5 w-5" />
+                <div className="rounded-3xl soft-card p-6 flex flex-col justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-accent shrink-0">
+                      <FolderGit2 className="h-5 w-5" strokeWidth={2.1} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
-                          <FolderCheck className="h-3.5 w-3.5" />
+                          <FolderCheck className="h-4 w-4" strokeWidth={2.1} />
                           <span>Step 3</span>
                         </span>
                         <span className="font-mono text-[10px] text-muted-foreground">
-                          {step3WorkingDirInfo.isGitWorktree ? "Git Worktree" : "Local Dir"}
+                          {step3WorkingDirInfo.isGitWorktree ? "Worktree" : "Local Dir"}
                         </span>
                       </div>
-                      <p className="text-xs font-mono text-foreground truncate mt-1" title={step3WorkingDirInfo.workingDir}>
+                      <p className="text-xs font-mono font-bold text-foreground truncate mt-1" title={step3WorkingDirInfo.workingDir}>
                         ./{step3WorkingDirInfo.relativeWorkingDir}
                       </p>
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="flex flex-wrap gap-1 mt-2">
                         {step3WorkingDirInfo.detectedFrameworks.length > 0 ? (
                           step3WorkingDirInfo.detectedFrameworks.slice(0, 2).map((fw) => (
                             <span
                               key={fw}
-                              className="inline-flex items-center rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-accent/25"
+                              className="inline-flex items-center rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold text-accent border border-accent/25"
                             >
                               {fw}
                             </span>
@@ -915,38 +915,38 @@ export function App() {
                   </div>
                 </div>
               ) : step2CloneInfo ? (
-                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
-                  <span className="h-2 w-2 rounded-full bg-accent/50 animate-pulse mr-2" />
+                <div className="rounded-3xl soft-inset p-6 flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-accent animate-pulse mr-2" />
                   <span>Setting working dir...</span>
                 </div>
               ) : (
-                <div className="rounded-xl border border-border/50 bg-muted/20 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground/60">
+                <div className="rounded-3xl soft-inset p-6 flex items-center justify-center text-xs text-muted-foreground/60">
                   <span>Step 3 pending</span>
                 </div>
               )}
 
-              {/* Step 4 Card: CLI AI Agent Invoked */}
+              {/* Step 4 Card: CLI AI Agent Invoked - 8-point: p-6 (24px), rounded-3xl */}
               {step4AgentInfo ? (
-                <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 shadow-xs">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0 mt-0.5">
-                      <Bot className="h-5 w-5" />
+                <div className="rounded-3xl soft-card p-6 flex flex-col justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-primary shrink-0">
+                      <Bot className="h-5 w-5" strokeWidth={2.1} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                          <Cpu className="h-3.5 w-3.5" />
+                          <Cpu className="h-4 w-4" strokeWidth={2.1} />
                           <span>Step 4</span>
                         </span>
                         <span className="font-mono text-[10px] text-muted-foreground">
                           PID: {step4AgentInfo.pid ?? "active"}
                         </span>
                       </div>
-                      <p className="text-xs font-semibold text-foreground truncate mt-1">
-                        CLI AI Agent Invoked
+                      <p className="text-xs font-bold text-foreground truncate mt-1">
+                        CLI AI Agent
                       </p>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="inline-flex items-center rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-mono font-medium text-primary border border-primary/25">
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-mono font-bold text-primary border border-primary/25">
                           agy v{step4AgentInfo.agentVersion}
                         </span>
                         <span className="text-[10px] font-mono text-muted-foreground truncate" title={step4AgentInfo.defaultModel}>
@@ -957,100 +957,100 @@ export function App() {
                   </div>
                 </div>
               ) : step3WorkingDirInfo ? (
-                <div className="rounded-xl border border-border bg-card/60 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground">
-                  <span className="h-2 w-2 rounded-full bg-primary/50 animate-pulse mr-2" />
+                <div className="rounded-3xl soft-inset p-6 flex items-center justify-center text-xs text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-primary animate-pulse mr-2" />
                   <span>Invoking CLI AI Agent...</span>
                 </div>
               ) : (
-                <div className="rounded-xl border border-border/50 bg-muted/20 p-4 shadow-xs flex items-center justify-center text-xs text-muted-foreground/60">
+                <div className="rounded-3xl soft-inset p-6 flex items-center justify-center text-xs text-muted-foreground/60">
                   <span>Step 4 pending</span>
                 </div>
               )}
             </div>
 
-            {/* Step 5: Active Query Dispatch Status Bar */}
+            {/* Step 5: Active Query Dispatch Status Bar - 8-point: p-6 (24px), rounded-3xl */}
             {step5QueryInfo && (
-              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/20 text-primary shrink-0">
-                    <Sparkles className="h-4 w-4" />
+              <div className="rounded-3xl soft-card p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-primary shrink-0">
+                    <Sparkles className="h-5 w-5" strokeWidth={2.1} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-primary flex items-center gap-1">
-                        <Send className="h-3 w-3" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                        <Send className="h-3.5 w-3.5" strokeWidth={2.1} />
                         <span>Step 5: Query Dispatched</span>
                       </span>
-                      <span className="text-[10px] font-mono text-muted-foreground">
+                      <span className="text-xs font-mono text-muted-foreground">
                         {step5QueryInfo.durationMs}ms
                       </span>
                     </div>
-                    <p className="font-mono text-xs text-foreground font-medium truncate mt-0.5" title={step5QueryInfo.query}>
+                    <p className="font-mono text-xs text-foreground font-bold truncate mt-1" title={step5QueryInfo.query}>
                       "{step5QueryInfo.query}"
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-1 text-[11px] font-mono text-foreground border border-border">
+                  <span className="inline-flex items-center gap-1 rounded-full soft-btn px-4 py-2 text-xs font-mono text-foreground">
                     <span className="text-muted-foreground">model:</span>
-                    <span>{step5QueryInfo.modelUsed}</span>
+                    <span className="font-bold">{step5QueryInfo.modelUsed}</span>
                   </span>
-                  <span className="inline-flex items-center gap-1 rounded bg-accent/15 px-2 py-1 text-[11px] font-mono text-accent border border-accent/25">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-4 py-2 text-xs font-mono text-accent border border-accent/25">
                     <span className="text-muted-foreground">skill:</span>
-                    <span>{step5QueryInfo.skillName}</span>
+                    <span className="font-bold">{step5QueryInfo.skillName}</span>
                   </span>
                 </div>
               </div>
             )}
 
-            {/* Step 6: Skill Loaded & Evaluation Pillars Status Bar */}
+            {/* Step 6: Skill Loaded & Evaluation Pillars Status Bar - 8-point: p-8 (32px), rounded-[32px] */}
             {step6SkillInfo && (
-              <div className="rounded-xl border border-accent/30 bg-accent/5 p-4 shadow-xs flex flex-col gap-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/20 text-accent shrink-0">
-                      <BookOpen className="h-4 w-4" />
+              <div className="rounded-[32px] soft-card p-8 flex flex-col gap-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn text-accent shrink-0">
+                      <BookOpen className="h-5 w-5" strokeWidth={2.1} />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-accent flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3" />
+                        <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
+                          <CheckCircle2 className="h-4 w-4" strokeWidth={2.1} />
                           <span>Step 6: Skill Loaded &amp; Applied</span>
                         </span>
-                        <span className="text-[10px] font-mono text-muted-foreground">
+                        <span className="text-xs font-mono text-muted-foreground">
                           {step6SkillInfo.durationMs}ms
                         </span>
                       </div>
-                      <p className="font-mono text-xs text-foreground font-semibold">
+                      <p className="font-mono text-xs text-foreground font-bold mt-1">
                         {step6SkillInfo.skillName} &middot; {step6SkillInfo.totalRulesCount} Evaluation Rules Active
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded bg-muted px-2.5 py-1 text-[11px] font-mono text-foreground border border-border">
-                      <FileCheck2 className="h-3.5 w-3.5 text-accent" />
+                    <span className="inline-flex items-center gap-2 rounded-full soft-btn px-4 py-2 text-xs font-mono text-foreground">
+                      <FileCheck2 className="h-4 w-4 text-accent" strokeWidth={2.1} />
                       <span>{step6SkillInfo.schemaTitle}</span>
-                      <span className="text-[10px] text-accent font-semibold">(Draft-07 Verified)</span>
+                      <span className="text-[10px] text-accent font-bold">(Draft-07 Verified)</span>
                     </span>
                   </div>
                 </div>
 
-                {/* 4 Pillars Breakdown Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-accent/15">
+                {/* 4 Pillars Breakdown Grid - 8-point: gap-4 (16px), p-4 (16px) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-border">
                   {step6SkillInfo.pillarBreakdowns.map((pb) => (
                     <div
                       key={pb.pillar}
-                      className="rounded-lg border border-border/70 bg-card/70 p-2.5 text-xs flex flex-col justify-between shadow-2xs"
+                      className="rounded-2xl soft-inset p-4 text-xs flex flex-col justify-between"
                     >
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="font-semibold text-foreground truncate">{pb.pillar}</span>
-                        <span className="inline-flex items-center rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-mono font-medium text-accent border border-accent/25">
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="font-bold text-foreground truncate">{pb.pillar}</span>
+                        <span className="inline-flex items-center rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-mono font-bold text-accent border border-accent/25">
                           {pb.rules_count} rules
                         </span>
                       </div>
-                      <p className="text-[11px] text-muted-foreground line-clamp-2" title={pb.focus}>
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed" title={pb.focus}>
                         {pb.focus}
                       </p>
                     </div>
@@ -1059,44 +1059,44 @@ export function App() {
               </div>
             )}
 
-            {/* Step 7: Perform Repository Analysis Card & Scorecard */}
+            {/* Step 7: Perform Repository Analysis Card & Scorecard - 8-point: p-8 (32px), rounded-[32px] */}
             {step7AnalysisInfo && (
-              <div className="rounded-xl border border-primary/30 bg-card p-5 shadow-xs flex flex-col gap-4">
-                {/* Header Banner */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/20 text-primary font-mono text-xl font-bold">
+              <div className="rounded-[32px] soft-card p-8 flex flex-col gap-6">
+                {/* Header Banner - 8-point: pb-6 (24px) */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-border">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl soft-btn text-primary font-mono text-2xl font-black shrink-0">
                       {step7AnalysisInfo.grade}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                          <CheckCircle2 className="h-4 w-4" />
+                          <CheckCircle2 className="h-4 w-4" strokeWidth={2.1} />
                           <span>Step 7: Repository Analysis Complete</span>
                         </span>
                         <span className="text-xs font-mono text-muted-foreground">
                           {step7AnalysisInfo.durationMs}ms
                         </span>
                       </div>
-                      <p className="text-sm font-semibold text-foreground mt-0.5">
+                      <p className="text-sm font-bold text-foreground mt-1">
                         Overall Score: {step7AnalysisInfo.overallScore}/100 &middot; Pattern: {step7AnalysisInfo.detectedArchitecture}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2.5 py-1 text-xs font-mono text-foreground border border-border">
+                    <span className="inline-flex items-center gap-1.5 rounded-full soft-btn px-4 py-2 text-xs font-mono text-foreground">
                       <span className="text-muted-foreground">Language:</span>
-                      <span className="font-semibold">{step7AnalysisInfo.primaryLanguage}</span>
+                      <span className="font-bold">{step7AnalysisInfo.primaryLanguage}</span>
                     </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-primary/15 px-2.5 py-1 text-xs font-mono text-primary border border-primary/25">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-4 py-2 text-xs font-mono text-primary border border-primary/25 font-bold">
                       <span>{step7AnalysisInfo.passedRulesCount}/{step7AnalysisInfo.totalRulesEvaluated} criteria passed</span>
                     </span>
                   </div>
                 </div>
 
-                {/* 4 Pillars Scorecards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 4 Pillars Scorecards - 8-point: gap-4 (16px), p-6 (24px) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {step7AnalysisInfo.pillars.map((pillar) => {
                     const statusColor =
                       pillar.status === "exceptional"
@@ -1112,40 +1112,40 @@ export function App() {
                     return (
                       <div
                         key={pillar.title}
-                        className="rounded-xl border border-border bg-card/60 p-3.5 shadow-2xs flex flex-col justify-between"
+                        className="rounded-3xl soft-card p-6 flex flex-col justify-between"
                       >
                         <div>
-                          <div className="flex items-center justify-between gap-1 mb-2">
-                            <span className="font-semibold text-sm text-foreground">{pillar.title}</span>
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-mono font-bold border ${statusColor}`}>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="font-bold text-sm text-foreground">{pillar.title}</span>
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-mono font-bold border ${statusColor}`}>
                               {pillar.score}/100
                             </span>
                           </div>
 
-                          <div className="w-full bg-muted rounded-full h-1.5 mb-2 overflow-hidden">
+                          <div className="w-full bg-secondary/80 rounded-full h-2 mb-4 overflow-hidden">
                             <div
-                              className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                              className="bg-primary h-2 rounded-full transition-all duration-500"
                               style={{ width: `${pillar.score}%` }}
                             />
                           </div>
 
-                          <p className="text-xs text-muted-foreground line-clamp-2 mb-2">
+                          <p className="text-xs text-muted-foreground line-clamp-2 mb-4 leading-relaxed">
                             {pillar.summary}
                           </p>
                         </div>
 
-                        <div className="pt-2 border-t border-border/50 flex items-center justify-between text-[11px] font-mono text-muted-foreground">
-                          <span>{passedCount}/{pillar.checklist.length} rules passed</span>
-                          <span className="capitalize">{pillar.status}</span>
+                        <div className="pt-4 border-t border-border flex items-center justify-between text-xs font-mono text-muted-foreground">
+                          <span>{passedCount}/{pillar.checklist.length} rules</span>
+                          <span className="capitalize font-semibold">{pillar.status}</span>
                         </div>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Executive Summary Preview */}
-                <div className="rounded-xl border border-border bg-muted/30 p-3.5 text-xs">
-                  <span className="font-bold text-foreground uppercase tracking-wider text-[10px] block mb-1">
+                {/* Executive Summary Preview - 8-point: p-6 (24px) */}
+                <div className="rounded-2xl soft-inset p-6 text-xs">
+                  <span className="font-bold text-foreground uppercase tracking-wider text-xs block mb-2">
                     Executive Appraisal Summary
                   </span>
                   <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
@@ -1155,11 +1155,11 @@ export function App() {
               </div>
             )}
 
-            {/* Sandbox Control Bar */}
+            {/* Sandbox Control Bar - 8-point: px-6 py-4 (24px/16px), rounded-full */}
             {step2CloneInfo && (
-              <div className="flex items-center justify-between bg-card border border-border px-4 py-2.5 rounded-xl shadow-xs text-xs">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between soft-card px-6 py-4 rounded-full gap-4 text-xs">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(46,204,113,0.8)] shrink-0" />
                   <span>
                     Sandbox isolated to <strong className="text-foreground font-mono">{step1Session.sessionId.slice(0, 8)}</strong>. All processes &amp; files wipe on close.
                   </span>
@@ -1168,10 +1168,10 @@ export function App() {
                 <button
                   onClick={handleDestroySandbox}
                   disabled={isClosingSandbox}
-                  className="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer disabled:opacity-50"
+                  className="flex h-10 items-center justify-center gap-2 rounded-full border border-destructive/30 bg-destructive/10 px-4 text-xs font-bold text-destructive hover:bg-destructive hover:text-white transition-colors cursor-pointer disabled:opacity-50 shrink-0"
                   title="Destroy this sandbox and delete all cloned repository files"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-4 w-4" strokeWidth={2.1} />
                   <span>{isClosingSandbox ? "Destroying..." : "Destroy Sandbox"}</span>
                 </button>
               </div>
@@ -1191,13 +1191,13 @@ export function App() {
         {report && <ReportDashboard report={report} />}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-border bg-card py-6 text-center text-xs text-muted-foreground">
-        <div className="container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      {/* Footer - 8-point: py-8 (32px), px-6 lg:px-8 (24px/32px) */}
+      <footer className="border-t border-border glass-header py-8 text-center text-xs text-muted-foreground">
+        <div className="container mx-auto px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p>
-            <strong className="font-semibold text-foreground">RepoAnalyzer Prototype</strong> &middot; Session Sandbox Architecture
+            <strong className="font-bold text-foreground">RepoAnalyzer Prototype</strong> &middot; Session Sandbox Architecture
           </p>
-          <div className="flex items-center gap-4 text-[11px]">
+          <div className="flex items-center gap-4 text-[11px] font-medium">
             <span>Ephemeral Sandbox Isolation</span>
             <span>&middot;</span>
             <span>Zero Host Clutter</span>

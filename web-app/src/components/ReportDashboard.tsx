@@ -31,14 +31,14 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
   };
 
   return (
-    <div className="mx-auto max-w-5xl my-8 space-y-6">
-      {/* Top Level Scorecard Hero */}
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+    <div className="mx-auto max-w-5xl my-8 space-y-8">
+      {/* Top Level Scorecard Hero - 8-point: p-8 (32px), rounded-[32px], soft-card */}
+      <div className="rounded-[32px] soft-card p-8">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-8">
           {/* Repo Info & Grade */}
-          <div className="space-y-2">
+          <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary border border-primary/20">
+              <span className="rounded-full bg-accent/15 px-4 py-1 text-xs font-bold text-accent border border-accent/25">
                 Audit Completed
               </span>
               <span className="font-mono text-xs text-muted-foreground">
@@ -46,7 +46,7 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
               </span>
             </div>
 
-            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground flex items-center gap-3">
               <span>{report.repoName}</span>
               <a
                 href={report.repoUrl}
@@ -55,57 +55,57 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
                 className="text-muted-foreground hover:text-foreground transition-colors"
                 title="View on GitHub"
               >
-                <ExternalLink className="h-4 w-4" />
+                <ExternalLink className="h-5 w-5" strokeWidth={2.1} />
               </a>
             </h1>
 
-            <p className="text-sm font-medium text-foreground/90">
-              Pattern:{" "}
-              <span className="text-primary font-semibold">
+            <p className="text-sm font-medium text-foreground">
+              Primary Architecture Pattern:{" "}
+              <span className="text-primary font-bold">
                 {report.primaryArchitecture}
               </span>
             </p>
           </div>
 
-          {/* Overall Grade Card */}
-          <div className="flex items-center gap-4 bg-muted/50 rounded-xl p-4 border border-border shrink-0">
+          {/* Overall Grade Card - 8-point: p-6 (24px), gap-6 (24px) */}
+          <div className="flex items-center gap-6 rounded-3xl soft-card p-6 shrink-0">
             <div className="text-center">
-              <div className="text-3xl font-black text-foreground leading-none">
+              <div className="text-4xl font-black text-foreground leading-none">
                 {report.grade}
               </div>
-              <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-1">
-                Grade
+              <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-2">
+                Overall Grade
               </div>
             </div>
 
-            <div className="h-10 w-px bg-border" />
+            <div className="h-12 w-px bg-border" />
 
             <div className="text-center">
-              <div className="text-3xl font-black text-primary leading-none">
+              <div className="text-4xl font-black text-primary leading-none">
                 {report.overallScore}
                 <span className="text-sm font-medium text-muted-foreground">/100</span>
               </div>
-              <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-1">
-                Index
+              <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mt-2">
+                Health Index
               </div>
             </div>
 
-            <div className="h-10 w-px bg-border hidden sm:block" />
+            <div className="h-12 w-px bg-border hidden sm:block" />
 
             <button
               onClick={handleDownloadReport}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground shadow-xs hover:opacity-90 transition-opacity cursor-pointer"
+              className="flex h-12 items-center gap-2 rounded-2xl soft-btn-primary px-6 text-xs font-bold shadow-md cursor-pointer"
               title="Download Markdown Report"
             >
-              <Download className="h-3.5 w-3.5" />
+              <Download className="h-4 w-4" strokeWidth={2.2} />
               <span>Export Report</span>
             </button>
           </div>
         </div>
 
-        {/* Executive Summary */}
-        <div className="mt-6 pt-5 border-t border-border">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+        {/* Executive Summary - 8-point: mt-8 (32px), pt-6 (24px) */}
+        <div className="mt-8 pt-6 border-t border-border">
+          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
             Executive Summary
           </h3>
           <p className="text-sm text-foreground/90 leading-relaxed">
@@ -114,75 +114,75 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ report }) => {
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex border-b border-border gap-2 text-sm">
+      {/* Navigation Tabs - 8-point: gap-4 (16px), mb-6 (24px) */}
+      <div className="flex items-center gap-4">
         <button
           onClick={() => setActiveTab("pillars")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors cursor-pointer ${
+          className={`flex items-center gap-2 rounded-full px-6 py-3 text-xs font-bold transition-all cursor-pointer ${
             activeTab === "pillars"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
+              ? "soft-btn-primary"
+              : "soft-btn text-muted-foreground hover:text-foreground"
           }`}
         >
-          <Layers className="h-4 w-4" />
-          <span>Evaluation Pillars (Scorecard)</span>
+          <Layers className="h-4 w-4" strokeWidth={2.1} />
+          <span>Evaluation Pillars (Scorecards)</span>
         </button>
 
         <button
           onClick={() => setActiveTab("raw")}
-          className={`flex items-center gap-2 pb-3 px-3 font-medium border-b-2 transition-colors cursor-pointer ${
+          className={`flex items-center gap-2 rounded-full px-6 py-3 text-xs font-bold transition-all cursor-pointer ${
             activeTab === "raw"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
+              ? "soft-btn-primary"
+              : "soft-btn text-muted-foreground hover:text-foreground"
           }`}
         >
-          <FileText className="h-4 w-4" />
-          <span>repo-analyzer Output</span>
+          <FileText className="h-4 w-4" strokeWidth={2.1} />
+          <span>Skill Markdown Output</span>
         </button>
       </div>
 
-      {/* Tab 1: 4 Core Evaluation Pillars */}
+      {/* Tab 1: 4 Core Evaluation Pillars - 8-point: gap-6 (24px) */}
       {activeTab === "pillars" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <PillarCard
             title={report.pillars.architecture.title}
             pillar={report.pillars.architecture}
-            icon={<Layers className="h-4 w-4 text-primary" />}
+            icon={<Layers className="h-5 w-5 text-primary" strokeWidth={2.1} />}
           />
           <PillarCard
             title={report.pillars.ideology.title}
             pillar={report.pillars.ideology}
-            icon={<GitFork className="h-4 w-4 text-accent" />}
+            icon={<GitFork className="h-5 w-5 text-accent" strokeWidth={2.1} />}
           />
           <PillarCard
             title={report.pillars.methodology.title}
             pillar={report.pillars.methodology}
-            icon={<ShieldCheck className="h-4 w-4 text-primary" />}
+            icon={<ShieldCheck className="h-5 w-5 text-primary" strokeWidth={2.1} />}
           />
           <PillarCard
             title={report.pillars.principles.title}
             pillar={report.pillars.principles}
-            icon={<Cpu className="h-4 w-4 text-accent" />}
+            icon={<Cpu className="h-5 w-5 text-accent" strokeWidth={2.1} />}
           />
         </div>
       )}
 
-      {/* Tab 2: Raw Skill Markdown */}
+      {/* Tab 2: Raw Skill Markdown - 8-point: p-8 (32px), rounded-[32px] */}
       {activeTab === "raw" && (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-border mb-3">
+        <div className="rounded-[32px] soft-card p-8">
+          <div className="flex items-center justify-between pb-4 border-b border-border mb-6">
             <span className="text-xs font-mono text-muted-foreground">
               Direct CLI Output strictly conforming to repo-analyzer skill schema
             </span>
             <button
               onClick={handleDownloadReport}
-              className="flex items-center gap-1 text-xs text-primary hover:underline font-medium cursor-pointer"
+              className="flex items-center gap-1.5 rounded-full soft-btn px-4 py-2 text-xs font-bold text-primary cursor-pointer"
             >
-              <Download className="h-3.5 w-3.5" />
+              <Download className="h-3.5 w-3.5" strokeWidth={2.1} />
               <span>Download Raw Markdown</span>
             </button>
           </div>
-          <pre className="font-mono text-xs text-foreground bg-muted/40 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap leading-relaxed">
+          <pre className="soft-inset p-6 rounded-2xl font-mono text-xs text-foreground overflow-x-auto whitespace-pre-wrap leading-relaxed">
             {report.rawMarkdownOutput}
           </pre>
         </div>
@@ -199,51 +199,53 @@ interface PillarCardProps {
 
 const PillarCard: React.FC<PillarCardProps> = ({ title, pillar, icon }) => {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-xs flex flex-col justify-between space-y-4">
+    <div className="rounded-3xl soft-card p-6 flex flex-col justify-between space-y-6">
       <div>
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {icon}
-            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {/* Header - 8-point: mb-4 (16px) */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl soft-btn">
+              {icon}
+            </div>
+            <h3 className="text-base font-bold text-foreground">{title}</h3>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-foreground">
+            <span className="text-xl font-extrabold text-foreground">
               {pillar.score}
               <span className="text-xs font-normal text-muted-foreground">/100</span>
             </span>
           </div>
         </div>
 
-        {/* Progress Bar */}
-        <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        {/* Progress Bar - 8-point: h-2 (8px), rounded-full */}
+        <div className="mt-2 h-2 w-full rounded-full bg-secondary/80 overflow-hidden">
           <div
             className="h-full rounded-full bg-primary transition-all duration-500"
             style={{ width: `${pillar.score}%` }}
           />
         </div>
 
-        {/* Summary */}
-        <p className="mt-3 text-xs text-muted-foreground leading-relaxed">
+        {/* Summary - 8-point: mt-4 (16px) */}
+        <p className="mt-4 text-xs text-muted-foreground leading-relaxed">
           {pillar.summary}
         </p>
 
-        {/* Checklist */}
-        <div className="mt-3 space-y-1.5 border-t border-border pt-3">
-          <h4 className="text-[11px] font-semibold text-foreground/80 uppercase tracking-wider">
+        {/* Checklist - 8-point: mt-6 (24px), pt-4 (16px), space-y-2 (8px) */}
+        <div className="mt-6 space-y-2 border-t border-border pt-4">
+          <h4 className="text-[11px] font-bold text-foreground/80 uppercase tracking-wider mb-2">
             Verification Checks
           </h4>
           {pillar.checklist.map((item, i) => (
-            <div key={i} className="flex items-start gap-2 text-xs">
+            <div key={i} className="flex items-start gap-2 text-xs leading-snug">
               {item.passed ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                <CheckCircle2 className="h-4 w-4 text-accent shrink-0 mt-0.5" strokeWidth={2.1} />
               ) : (
-                <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
+                <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" strokeWidth={2.1} />
               )}
-              <span className={item.passed ? "text-foreground" : "text-destructive font-medium"}>
+              <span className={item.passed ? "text-foreground" : "text-destructive font-semibold"}>
                 {item.label}
                 {item.note && (
-                  <span className="block text-[10px] text-muted-foreground font-normal">
+                  <span className="block text-[11px] text-muted-foreground font-normal mt-0.5">
                     {item.note}
                   </span>
                 )}
@@ -253,14 +255,14 @@ const PillarCard: React.FC<PillarCardProps> = ({ title, pillar, icon }) => {
         </div>
       </div>
 
-      {/* Strengths & Anti-Patterns */}
-      <div className="space-y-2 border-t border-border pt-3">
+      {/* Strengths & Anti-Patterns - 8-point: border-t pt-4 (16px), space-y-4 (16px) */}
+      <div className="space-y-4 border-t border-border pt-4">
         {pillar.strengths.length > 0 && (
           <div className="space-y-1">
-            <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
+            <span className="text-[11px] font-bold text-accent uppercase tracking-wider">
               Strong Patterns
             </span>
-            <ul className="text-xs text-muted-foreground list-disc list-inside space-y-0.5">
+            <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
               {pillar.strengths.map((s, idx) => (
                 <li key={idx}>{s}</li>
               ))}
@@ -269,11 +271,11 @@ const PillarCard: React.FC<PillarCardProps> = ({ title, pillar, icon }) => {
         )}
 
         {pillar.antiPatterns.length > 0 && (
-          <div className="space-y-1 pt-1">
-            <span className="text-[10px] font-bold text-destructive uppercase tracking-wider">
+          <div className="space-y-1">
+            <span className="text-[11px] font-bold text-destructive uppercase tracking-wider">
               Potential Anti-Patterns
             </span>
-            <ul className="text-xs text-muted-foreground list-disc list-inside space-y-0.5">
+            <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
               {pillar.antiPatterns.map((a, idx) => (
                 <li key={idx}>{a}</li>
               ))}
