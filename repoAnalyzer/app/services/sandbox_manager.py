@@ -317,7 +317,7 @@ class SessionSandbox:
         self._stream_consumers: dict[int, ProcessStreamConsumer] = {}
 
         # OS Process Sandbox & Resource Boundary (Job Object on Windows, rlimit on POSIX)
-        max_mem_mb = int(os.environ.get("REPO_ANALYZER_SANDBOX_MAX_MEMORY_MB", "512"))
+        max_mem_mb = int(os.environ.get("REPO_ANALYZER_SANDBOX_MAX_MEMORY_MB", "1024"))
         max_procs = int(os.environ.get("REPO_ANALYZER_SANDBOX_MAX_PROCESSES", "32"))
         self.resource_boundary = ProcessResourceBoundary(
             max_memory_bytes=max_mem_mb * 1024 * 1024,
@@ -334,8 +334,7 @@ class SessionSandbox:
         if proc is not None:
             if proc not in self.active_processes:
                 self.active_processes.append(proc)
-            if self.agent_process is None or not hasattr(self.agent_process, "poll") or self.agent_process.poll() is not None:
-                self.agent_process = proc
+            self.agent_process = proc
 
             # Assign process to OS kernel sandbox resource boundary
             self.resource_boundary.assign_process(proc)

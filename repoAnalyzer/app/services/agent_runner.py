@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sandbox_manager import sandbox_manager, validate_skill_name_security, SandboxError
 from app.services.report_generator import report_generator
+from app.services.repo_inspector import repo_inspector
 from app.schemas.analysis import validate_safe_custom_flags
 
 
@@ -433,31 +434,51 @@ class AgentRunner:
             "status": "loaded",
         }
 
-    async def _wait_for_agent_output(self, sandbox: Any, timeout: float = 3.0) -> str:
+    async def _wait_for_agent_output(self, sandbox: Any, timeout: float = 120.0, pid: Optional[int] = None) -> str:
         """
         Polls the background stream consumer for accumulated stdout until either
-        output is produced or timeout expires. Returns all collected stdout.
+        the agent process finishes execution or timeout expires. Returns all collected stdout.
         """
         if not sandbox:
             return ""
 
         start = time.perf_counter()
-        initial_len = len(sandbox.get_agent_stdout())
+        target_pid = pid or getattr(sandbox, "agent_pid", None)
+        proc = getattr(sandbox, "agent_process", None)
 
         while time.perf_counter() - start < timeout:
-            current_out = sandbox.get_agent_stdout()
-            if len(current_out) > initial_len:
-                # Output has started flowing, give a brief moment for any pending chunks
-                await asyncio.sleep(0.3)
-                return sandbox.get_agent_stdout()
-            # If agent finished running, return immediately
-            proc = getattr(sandbox, "agent_process", None)
             if proc and proc.poll() is not None:
-                await asyncio.sleep(0.05)
-                return sandbox.get_agent_stdout()
+                # Agent process completed execution, give brief moment for background stream reader to flush final chunk
+                await asyncio.sleep(0.3)
+                return sandbox.get_process_stdout(target_pid) if target_pid else sandbox.get_agent_stdout()
+
+            # Early exit ONLY if full output is already completely received and validly parseable
+            buffered = sandbox.get_process_stdout(target_pid) if target_pid else sandbox.get_agent_stdout()
+            if buffered and ('"status":"SUCCESS"' in buffered or '"status": "SUCCESS"' in buffered) and '"pillars"' in buffered:
+                try:
+                    envelope = json.loads(buffered.strip())
+                    if isinstance(envelope, dict) and envelope.get("status") == "SUCCESS":
+                        if "structured_output" in envelope and isinstance(envelope["structured_output"], dict):
+                            return buffered
+                        resp = envelope.get("response", "")
+                        if isinstance(resp, str) and resp.strip():
+                            json.loads(resp.strip())
+                            return buffered
+                except Exception:
+                    # Still receiving stream chunks, continue loop
+                    pass
+
+            await asyncio.sleep(0.2)
+
+        # Timeout reached: terminate process if still running
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
             await asyncio.sleep(0.1)
 
-        return sandbox.get_agent_stdout()
+        return sandbox.get_process_stdout(target_pid) if target_pid else sandbox.get_agent_stdout()
 
     def _read_process_stdout(self, proc: Any, timeout: float = 3.0, sandbox: Optional[Any] = None) -> str:
         """
@@ -553,6 +574,12 @@ class AgentRunner:
         """
         combined = f"{stderr}\n{stdout}".lower()
         model_error_indicators = [
+            "not logged into antigravity",
+            "you are not logged into",
+            "auth mode is unspecified",
+            "error getting token source",
+            "token source",
+            "failed to get load code assist response",
             "model unavailable",
             "model is unavailable",
             "model not found",
@@ -576,7 +603,7 @@ class AgentRunner:
                 for line in f"{stderr}\n{stdout}".splitlines():
                     if pattern in line.lower():
                         return line.strip()
-                return f"Model error detected: {pattern}"
+                return f"Model/Auth error detected: {pattern}"
         return None
 
     def _parse_and_validate_ai_output(
@@ -596,29 +623,35 @@ class AgentRunner:
 
         candidate_str = raw_text.strip()
 
-        # Handle agy JSON output envelope {"response": "...", "status": "SUCCESS"}
+        parsed: Optional[dict[str, Any]] = None
+
+        # Handle agy JSON output envelope {"response": "...", "status": "SUCCESS", "structured_output": {...}}
         try:
             envelope = json.loads(candidate_str)
-            if isinstance(envelope, dict) and "response" in envelope and isinstance(envelope["response"], str):
-                inner = envelope["response"].strip()
-                if inner:
-                    candidate_str = inner
+            if isinstance(envelope, dict):
+                if "structured_output" in envelope and isinstance(envelope["structured_output"], dict):
+                    parsed = envelope["structured_output"]
+                elif "response" in envelope and isinstance(envelope["response"], str):
+                    inner = envelope["response"].strip()
+                    if inner:
+                        candidate_str = inner
         except Exception:
             pass
 
-        # Extract markdown code fence if present ```json ... ```
-        code_fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", candidate_str)
-        if code_fence_match:
-            candidate_str = code_fence_match.group(1).strip()
-        else:
-            json_obj_match = re.search(r"(\{[\s\S]*\})", candidate_str)
-            if json_obj_match:
-                candidate_str = json_obj_match.group(1).strip()
+        if parsed is None:
+            # Extract markdown code fence if present ```json ... ```
+            code_fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", candidate_str)
+            if code_fence_match:
+                candidate_str = code_fence_match.group(1).strip()
+            else:
+                json_obj_match = re.search(r"(\{[\s\S]*\})", candidate_str)
+                if json_obj_match:
+                    candidate_str = json_obj_match.group(1).strip()
 
-        try:
-            parsed = json.loads(candidate_str)
-        except Exception:
-            return None
+            try:
+                parsed = json.loads(candidate_str)
+            except Exception:
+                return None
 
         if not isinstance(parsed, dict):
             return None
@@ -717,91 +750,127 @@ class AgentRunner:
         version = self.get_agent_version(binary_path)
         ai_evaluator = f"Antigravity CLI Agent ({version}) [{active_model}]"
 
-        # AI Agent Invocation: Engage the CLI AI agent runtime in the working directory
-        agent_proc = getattr(sandbox, "agent_process", None)
-        raw_stdout = ""
+        # Terminate any previous idle process from Step 4 if still running
+        old_proc = getattr(sandbox, "agent_process", None)
+        if old_proc and old_proc.poll() is None:
+            try:
+                old_proc.terminate()
+                try:
+                    await asyncio.to_thread(old_proc.wait, timeout=1.0)
+                except Exception:
+                    old_proc.kill()
+                    await asyncio.to_thread(old_proc.wait, timeout=1.0)
+            except Exception:
+                pass
+
+        # Locate report schema path
+        loaded_skill_dir = getattr(sandbox, "loaded_skill_dir", None)
+        schema_path = None
+        if loaded_skill_dir:
+            cand = os.path.join(loaded_skill_dir, "schemas", "report_schema.json")
+            if os.path.exists(cand):
+                schema_path = cand
+        if not schema_path:
+            cand = os.path.realpath(os.path.expanduser("~/.agents/skills/repo-analyzer/schemas/report_schema.json"))
+            if os.path.exists(cand):
+                schema_path = cand
+
+        # Collect codebase structural metrics and evidence to ground the AI evaluation
+        evidence_lines = []
+        try:
+            inspection_evidence = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
+            if inspection_evidence:
+                top_langs = [f"{k} ({v} files)" for k, v in inspection_evidence.get("file_counts", {}).items()][:4]
+                if top_langs:
+                    evidence_lines.append(f"Languages: {', '.join(top_langs)}")
+                top_entries = inspection_evidence.get("top_level_entries", [])[:15]
+                if top_entries:
+                    evidence_lines.append(f"Top-level entries: {', '.join(top_entries)}")
+                frameworks = inspection_evidence.get("frameworks", [])
+                if frameworks:
+                    evidence_lines.append(f"Detected stacks/frameworks: {', '.join(frameworks)}")
+                ci_configs = inspection_evidence.get("ci_cd_configs", [])
+                if ci_configs:
+                    evidence_lines.append(f"CI/CD configs: {', '.join(ci_configs)}")
+        except Exception:
+            pass
+
+        codebase_context = ""
+        if evidence_lines:
+            codebase_context = "Codebase context:\n" + "\n".join(f"- {line}" for line in evidence_lines) + "\n\n"
+
+        # Extract checklist guidance from loaded skill if available
+        skill_breakdowns = getattr(sandbox, "skill_breakdowns", [])
+        pillar_hints = ""
+        if skill_breakdowns:
+            pillar_hints = "Audit criteria by pillar:\n"
+            for pb in skill_breakdowns:
+                pillar_hints += f"- {pb['pillar']} ({pb.get('focus', '')}): " + ", ".join(pb.get("items", [])[:5]) + "\n"
+
         analysis_instruction = (
-            f"Perform deep repository analysis for '{repo_name}' using repo-analyzer skill. "
-            "Evaluate Architecture, Ideology, Methodology, and Software Principles according to schemas/report_schema.json. "
-            "Emit your analysis strictly as a JSON object adhering to schemas/report_schema.json with "
-            "executiveSummary, metadata (overallScore, grade, primaryArchitecturePattern, primaryLanguage), and pillars."
+            f"Analyze the repository '{repo_name}' located at '{working_dir}' using the repo-analyzer skill.\n\n"
+            f"{codebase_context}"
+            f"Audit the codebase across all 4 pillars: Architecture, Ideology, Methodology, and Software Principles.\n\n"
+            f"{pillar_hints}\n"
+            "Conclude your evaluation and output strictly as a JSON object adhering to schemas/report_schema.json with "
+            "executiveSummary, metadata (overallScore, grade, primaryArchitecturePattern, primaryLanguage, secondaryLanguages), and pillars."
         )
 
-        # 1. Check if existing AI agent process is dead
-        if agent_proc and agent_proc.poll() is not None:
-            rc = agent_proc.returncode
-            err = sandbox.get_agent_stderr() or ""
-            logger.error(
-                "AI agent process died before Step 7 analysis execution",
-                session_id=session_id,
-                pid=agent_proc.pid,
-                exit_code=rc,
-            )
-            raise AgentRunnerError(
-                f"AI agent process (PID: {agent_proc.pid}) died with exit code {rc} before analysis could execute. Stderr: {err[:300].strip() or 'None'}"
-            )
+        analysis_timeout = float(os.getenv("REPO_ANALYZER_ANALYSIS_TIMEOUT", "120.0"))
 
-        # 2. If no process is running, spawn dedicated CLI AI agent process
-        if not agent_proc or agent_proc.poll() is not None:
-            logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
-            cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
-            isolated_env = sandbox.build_isolated_environment(working_dir)
+        cmd = [
+            binary_path,
+            "--dangerously-skip-permissions",
+            "--model", active_model,
+            "--output-format", "json",
+            "--print-timeout", f"{int(analysis_timeout)}s",
+        ]
+        if schema_path and os.path.exists(schema_path):
+            cmd.extend(["--json-schema", schema_path])
+        cmd.extend(["--print", analysis_instruction])
 
-            try:
-                agent_proc = await asyncio.to_thread(
-                    subprocess.Popen,
-                    cmd,
-                    cwd=working_dir,
-                    env=isolated_env,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-            except Exception as e:
-                logger.error("Failed to spawn CLI AI agent process for Step 7", session_id=session_id, error=str(e))
-                raise AgentRunnerError(f"Failed to spawn CLI AI agent process: {str(e)}")
+        isolated_env = sandbox.build_isolated_environment(working_dir)
 
-            sandbox.register_process(agent_proc)
-            setattr(sandbox, "agent_process", agent_proc)
-            setattr(sandbox, "agent_pid", agent_proc.pid)
-
-            await asyncio.sleep(0.05)
-            if agent_proc.poll() is not None:
-                rc = agent_proc.returncode
-                err = sandbox.get_agent_stderr() or ""
-                raise AgentRunnerError(
-                    f"AI agent process (PID: {agent_proc.pid}) died immediately on launch with exit code {rc}. Stderr: {err[:300].strip() or 'None'}"
-                )
-
-        # 3. Transmit analysis instruction to agent stdin (fail explicitly if stdin fails)
-        if not agent_proc.stdin or agent_proc.stdin.closed:
-            raise AgentRunnerError(
-                f"AI agent process (PID: {agent_proc.pid}) stdin is closed or unavailable. Cannot transmit analysis directive."
-            )
+        logger.info(
+            "Step 7: Launching non-interactive AI agent analysis via print mode",
+            session_id=session_id,
+            repo_name=repo_name,
+            model=active_model,
+            timeout=analysis_timeout,
+            schema_enforced=bool(schema_path),
+        )
 
         try:
-            agent_proc.stdin.write(f"{analysis_instruction}\n")
-            agent_proc.stdin.flush()
-            logger.info(
-                "Dispatched analysis directive to active AI agent runtime stdin",
-                session_id=session_id,
-                pid=agent_proc.pid,
-                model=active_model,
+            agent_proc = await asyncio.to_thread(
+                subprocess.Popen,
+                cmd,
+                cwd=working_dir,
+                env=isolated_env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
         except Exception as e:
-            logger.error("Failed to transmit analysis directive to AI agent stdin", session_id=session_id, error=str(e))
-            raise AgentRunnerError(
-                f"AI agent stdin communication failed: {str(e)}. Process cannot receive analysis directive."
-            )
+            logger.error("Failed to spawn CLI AI agent process for Step 7", session_id=session_id, error=str(e))
+            raise AgentRunnerError(f"Failed to spawn CLI AI agent process: {str(e)}")
 
-        # 4. Await AI agent stdout output from background stream consumer
-        raw_stdout = await self._wait_for_agent_output(sandbox, timeout=3.0)
-        raw_stderr = sandbox.get_agent_stderr()
+        sandbox.register_process(agent_proc)
+        setattr(sandbox, "agent_process", agent_proc)
+        setattr(sandbox, "agent_pid", agent_proc.pid)
+
+        # Await AI agent completion or timeout from background stream consumer
+        raw_stdout = await self._wait_for_agent_output(sandbox, timeout=analysis_timeout, pid=agent_proc.pid)
+        raw_stderr = sandbox.get_process_stderr(agent_proc.pid) or sandbox.get_agent_stderr()
 
         # 5. Check if AI process died during execution
         if agent_proc.poll() is not None and agent_proc.returncode != 0:
-            err_msg = raw_stderr[:300].strip() or (raw_stdout[:300].strip() if raw_stdout else "None")
+            err_msg = (
+                sandbox.get_process_stderr(agent_proc.pid).strip()
+                or sandbox.get_process_stdout(agent_proc.pid).strip()
+                or raw_stderr[:300].strip()
+                or (raw_stdout[:300].strip() if raw_stdout else "None")
+            )
             logger.error(
                 "AI agent process died during analysis execution",
                 session_id=session_id,
@@ -900,6 +969,8 @@ class AgentRunner:
             "executive_summary": inspection["executive_summary"],
             "pillars": inspection["pillars"],
             "ai_agent_invoked": True,
+            "ai_analysis_used": True,
+            "ai_analysis_source": inspection.get("ai_analysis_source", "agy_stdout"),
             "ai_agent_model": active_model,
             "ai_agent_evaluator": ai_evaluator,
             "status": "analyzed",

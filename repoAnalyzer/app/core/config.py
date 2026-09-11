@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     # Agent Model
-    DEFAULT_MODEL: str = "gemini-3.8-flash-medium"
+    DEFAULT_MODEL: str = "gemini-3.8-flash-low"
 
 
     # CORS
