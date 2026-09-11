@@ -74,42 +74,70 @@ def _sync_count_files_and_size(directory: str) -> tuple[int, int]:
     return total_files, total_size
 
 
+# Hardened git configuration flags preventing arbitrary command execution, hooks, and SSRF
+GIT_SANDBOX_SECURITY_FLAGS: list[str] = [
+    "-c", "protocol.file.allow=never",
+    "-c", "protocol.ext.allow=never",
+    "-c", "core.hooksPath=" + ("NUL" if os.name == "nt" else "/dev/null"),
+    "-c", "core.fsmonitor=false",
+    "-c", "credential.helper=",
+    "-c", "transfer.fsckObjects=true",
+]
+
+
 def _sync_get_git_metadata(
     directory: str,
+    sandbox: Optional[SessionSandbox] = None,
     timeout: float = DEFAULT_GIT_METADATA_TIMEOUT,
     env: Optional[dict[str, str]] = None,
 ) -> tuple[str, str]:
-    """Retrieve current commit hash and branch name via subprocess with timeout protection."""
-    try:
-        proc_commit = subprocess.run(
-            [GIT_BIN, "rev-parse", "--short", "HEAD"],
-            cwd=directory,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=timeout,
-            env=env,
-        )
-        commit_hash = proc_commit.stdout.strip() or "unknown"
+    """Retrieve current commit hash and branch name via subprocess with timeout and boundary protection."""
+    commit_hash = "unknown"
+    branch = "main"
 
-        proc_branch = subprocess.run(
-            [GIT_BIN, "rev-parse", "--abbrev-ref", "HEAD"],
+    try:
+        cmd_commit = [GIT_BIN] + GIT_SANDBOX_SECURITY_FLAGS + ["rev-parse", "--short", "HEAD"]
+        proc_commit = subprocess.Popen(
+            cmd_commit,
             cwd=directory,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
-            timeout=timeout,
             env=env,
         )
-        branch = proc_branch.stdout.strip() or "main"
+        if sandbox:
+            sandbox.register_process(proc_commit)
+        try:
+            proc_commit.wait(timeout=timeout)
+            time.sleep(0.02)
+            out = sandbox.get_process_stdout(proc_commit.pid) if sandbox else (proc_commit.stdout.read() if proc_commit.stdout else "")
+            commit_hash = out.strip() or "unknown"
+        except subprocess.TimeoutExpired:
+            _terminate_subprocess(proc_commit)
+
+        cmd_branch = [GIT_BIN] + GIT_SANDBOX_SECURITY_FLAGS + ["rev-parse", "--abbrev-ref", "HEAD"]
+        proc_branch = subprocess.Popen(
+            cmd_branch,
+            cwd=directory,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        if sandbox:
+            sandbox.register_process(proc_branch)
+        try:
+            proc_branch.wait(timeout=timeout)
+            time.sleep(0.02)
+            out = sandbox.get_process_stdout(proc_branch.pid) if sandbox else (proc_branch.stdout.read() if proc_branch.stdout else "")
+            branch = out.strip() or "main"
+        except subprocess.TimeoutExpired:
+            _terminate_subprocess(proc_branch)
 
         return commit_hash, branch
-    except subprocess.TimeoutExpired:
-        logger.warning("Git metadata retrieval timed out", directory=directory, timeout=timeout)
-        return "unknown", "main"
     except Exception as e:
         logger.warning("Could not retrieve git metadata", error=repr(e))
-        return "unknown", "main"
+        return commit_hash, branch
 
 
 def validate_repo_url_security(url: str) -> str:
@@ -177,22 +205,27 @@ def _check_github_repo_size_preflight(repo_url: str, max_size_bytes: int) -> Non
 def _sync_clone(
     repo_url: str,
     target_dir: str,
+    sandbox: SessionSandbox,
     timeout: float = DEFAULT_GIT_CLONE_TIMEOUT,
     max_size_bytes: int = DEFAULT_MAX_REPO_SIZE_BYTES,
     max_file_count: int = DEFAULT_MAX_REPO_FILES,
     env: Optional[dict[str, str]] = None,
 ) -> subprocess.CompletedProcess[str]:
     """
-    Execute git clone command synchronously inside a worker thread with:
-    1. Real-time disk consumption watchdog (terminates immediately if downloaded size exceeds max_size_bytes).
-    2. Real-time file count watchdog (terminates immediately if file count exceeds max_file_count).
-    3. Strict timeout enforcement.
-    4. Option injection protection.
+    Execute git clone command confined within the sandbox boundary:
+    1. Working directory confined strictly to sandbox.root_dir.
+    2. Process registered in sandbox.active_processes and bound to OS resource limits (Job Object).
+    3. Real-time disk consumption watchdog (terminates immediately if downloaded size exceeds max_size_bytes).
+    4. Real-time file count watchdog (terminates immediately if file count exceeds max_file_count).
+    5. Git security flags (disables file:// SSRF, ext protocols, hooks, fsmonitor, and credential helpers).
+    6. Strict timeout enforcement.
     """
     start_time = time.perf_counter()
+    cmd = [GIT_BIN] + GIT_SANDBOX_SECURITY_FLAGS + ["clone", "--depth", "1", "--", repo_url, target_dir]
     try:
         proc = subprocess.Popen(
-            [GIT_BIN, "clone", "--depth", "1", "--", repo_url, target_dir],
+            cmd,
+            cwd=sandbox.root_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -200,6 +233,9 @@ def _sync_clone(
         )
     except Exception as e:
         raise GitCloneError(f"Failed to spawn git clone process: {str(e)}")
+
+    # Enforce sandbox process boundary & OS kernel resource limits
+    sandbox.register_process(proc)
 
     poll_interval = 0.25
     timed_out = False
@@ -253,9 +289,12 @@ def _sync_clone(
             f"Repository file count limit exceeded during clone: reached {observed_files} files (maximum allowed: {max_file_count} files). Clone aborted."
         )
 
-    stdout, stderr = proc.communicate()
+    proc.wait()
+    time.sleep(0.02)
+    stdout = sandbox.get_process_stdout(proc.pid) or (proc.stdout.read() if proc.stdout else "")
+    stderr = sandbox.get_process_stderr(proc.pid) or (proc.stderr.read() if proc.stderr else "")
     return subprocess.CompletedProcess(
-        args=[GIT_BIN, "clone", "--depth", "1", "--", repo_url, target_dir],
+        args=cmd,
         returncode=proc.returncode,
         stdout=stdout,
         stderr=stderr,
@@ -271,7 +310,8 @@ async def clone_repository_into_sandbox(
 ) -> dict[str, Any]:
     """
     Execute Step 2: Clone repository directly into the dedicated Session Sandbox.
-    Enforces pre-flight size check, real-time disk/file watchdog, timeout, and post-clone verification.
+    Enforces sandbox boundary confinement, pre-flight size check, real-time disk/file watchdog,
+    OS process resource limits, timeout, and post-clone verification.
     """
     # Strict URL validation before any filesystem or process activity
     clean_repo_url = validate_repo_url_security(repo_url)
@@ -283,12 +323,17 @@ async def clone_repository_into_sandbox(
     sandbox: SessionSandbox = sandbox_manager.get_or_create_sandbox(session_id)
     target_repo_dir = sandbox.set_repo_dir("repo")
 
-    # Build isolated environment with terminal prompts disabled to prevent hanging on auth
+    # Build isolated environment with git config lockdown and prompt suppression
     clone_env = sandbox.build_isolated_environment(
+        working_dir=sandbox.root_dir,
         extra_env={
             "GIT_TERMINAL_PROMPT": "0",
             "GIT_ASKPASS": "",
-        }
+            "SSH_ASKPASS": "",
+            "GIT_SSH_COMMAND": "",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": "NUL" if os.name == "nt" else "/dev/null",
+        },
     )
 
     logger.info(
@@ -303,11 +348,12 @@ async def clone_repository_into_sandbox(
     )
 
     try:
-        # 2. Run shallow clone with active disk/file watchdog and timeout
+        # 2. Run shallow clone confined inside sandbox boundary with active watchdog and OS resource limits
         proc = await asyncio.to_thread(
             _sync_clone,
             clean_repo_url,
             target_repo_dir,
+            sandbox,
             timeout,
             max_size_bytes,
             max_file_count,
@@ -338,7 +384,13 @@ async def clone_repository_into_sandbox(
             )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-        commit_hash, branch = await asyncio.to_thread(_sync_get_git_metadata, target_repo_dir, DEFAULT_GIT_METADATA_TIMEOUT, clone_env)
+        commit_hash, branch = await asyncio.to_thread(
+            _sync_get_git_metadata,
+            target_repo_dir,
+            sandbox,
+            DEFAULT_GIT_METADATA_TIMEOUT,
+            clone_env,
+        )
 
         logger.info(
             "Step 2 completed: Repository cloned into Session Sandbox",

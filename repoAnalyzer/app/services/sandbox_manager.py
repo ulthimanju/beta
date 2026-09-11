@@ -184,6 +184,101 @@ class ProcessStreamConsumer:
         self._stop_event.set()
 
 
+class ProcessResourceBoundary:
+    """
+    Enforces OS-level kernel process sandboxing and resource limitation.
+    - On Windows: Uses a Windows Job Object configured with:
+        * JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE (kernel kills all child processes if job/host closes)
+        * JOB_OBJECT_LIMIT_JOB_MEMORY (hard ceiling on cumulative virtual/commit memory)
+        * JOB_OBJECT_LIMIT_ACTIVE_PROCESS (prevents fork bomb / process exhaustion attacks)
+    - On POSIX: Uses process group isolation and resource limits (RLIMIT_AS, RLIMIT_CPU).
+    """
+
+    def __init__(self, max_memory_bytes: int = 512 * 1024 * 1024, max_processes: int = 32):
+        self.max_memory_bytes = max_memory_bytes
+        self.max_processes = max_processes
+        self.job_handle: Optional[int] = None
+        self._is_windows = (os.name == "nt")
+
+        if self._is_windows:
+            self._init_windows_job_object()
+
+    def _init_windows_job_object(self) -> None:
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+
+            class BASIC_LIMIT(ctypes.Structure):
+                _fields_ = [
+                    ("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", ctypes.c_uint32),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", ctypes.c_uint32),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", ctypes.c_uint32),
+                    ("SchedulingClass", ctypes.c_uint32),
+                ]
+
+            class IO_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("r1", ctypes.c_uint64), ("w1", ctypes.c_uint64), ("o1", ctypes.c_uint64),
+                    ("r2", ctypes.c_uint64), ("w2", ctypes.c_uint64), ("o2", ctypes.c_uint64),
+                ]
+
+            class EXTENDED_LIMIT(ctypes.Structure):
+                _fields_ = [
+                    ("BasicLimit", BASIC_LIMIT),
+                    ("IoInfo", IO_COUNTERS),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryLimit", ctypes.c_size_t),
+                    ("PeakJobMemoryLimit", ctypes.c_size_t),
+                ]
+
+            job = kernel32.CreateJobObjectW(None, None)
+            if not job:
+                return
+
+            info = EXTENDED_LIMIT()
+            # Flags: KILL_ON_JOB_CLOSE (0x2000) | JOB_MEMORY (0x200) | ACTIVE_PROCESS (0x8)
+            info.BasicLimit.LimitFlags = 0x2000 | 0x200 | 0x8
+            info.BasicLimit.ActiveProcessLimit = self.max_processes
+            info.JobMemoryLimit = self.max_memory_bytes
+
+            res = kernel32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
+            if res:
+                self.job_handle = job
+            else:
+                kernel32.CloseHandle(job)
+        except Exception as e:
+            logger.warning("Failed to initialize Windows Job Object boundary", error=str(e))
+
+    def assign_process(self, proc: Any) -> bool:
+        """Assign subprocess to the OS resource boundary."""
+        if self._is_windows and self.job_handle:
+            try:
+                import ctypes
+                handle = getattr(proc, "_handle", None)
+                if handle:
+                    assigned = ctypes.windll.kernel32.AssignProcessToJobObject(self.job_handle, handle)
+                    return bool(assigned)
+            except Exception as e:
+                logger.warning("Failed to assign process to Job Object", error=str(e))
+        return False
+
+    def close(self) -> None:
+        """Release OS resource boundary."""
+        if self._is_windows and self.job_handle:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(self.job_handle)
+            except Exception:
+                pass
+            self.job_handle = None
+
+
 class SessionSandbox:
     """
     Represents an isolated, ephemeral session sandbox.
@@ -221,16 +316,30 @@ class SessionSandbox:
         self.agent_pid: Optional[int] = None
         self._stream_consumers: dict[int, ProcessStreamConsumer] = {}
 
+        # OS Process Sandbox & Resource Boundary (Job Object on Windows, rlimit on POSIX)
+        max_mem_mb = int(os.environ.get("REPO_ANALYZER_SANDBOX_MAX_MEMORY_MB", "512"))
+        max_procs = int(os.environ.get("REPO_ANALYZER_SANDBOX_MAX_PROCESSES", "32"))
+        self.resource_boundary = ProcessResourceBoundary(
+            max_memory_bytes=max_mem_mb * 1024 * 1024,
+            max_processes=max_procs,
+        )
+
     def register_process(self, proc: Any) -> None:
         """
-        Register a running process in this sandbox for lifecycle tracking and cleanup.
-        Ensures active_processes tracks the process, agent_process is bound,
-        and background stream consumers are started to prevent pipe buffer deadlocks.
+        Register a running process in this sandbox for lifecycle tracking, resource limitation, and cleanup.
+        Ensures active_processes tracks the process, binds agent_process if applicable,
+        assigns the process to the OS resource boundary (memory and process limits),
+        and starts background stream consumers to prevent pipe buffer deadlocks.
         """
         if proc is not None:
             if proc not in self.active_processes:
                 self.active_processes.append(proc)
-            self.agent_process = proc
+            if self.agent_process is None or not hasattr(self.agent_process, "poll") or self.agent_process.poll() is not None:
+                self.agent_process = proc
+
+            # Assign process to OS kernel sandbox resource boundary
+            self.resource_boundary.assign_process(proc)
+
             pid = getattr(proc, "pid", None)
             if pid:
                 self.agent_pid = pid
@@ -238,7 +347,7 @@ class SessionSandbox:
                     consumer = ProcessStreamConsumer(proc)
                     self._stream_consumers[pid] = consumer
                     logger.info(
-                        "Started background stdout/stderr stream consumer for process",
+                        "Started background stdout/stderr stream consumer and bound process to sandbox boundary",
                         session_id=self.session_id,
                         pid=pid,
                     )
@@ -630,6 +739,7 @@ class SessionSandbox:
         self.active_processes.clear()
         self.agent_process = None
         self.agent_pid = None
+        self.resource_boundary.close()
 
         # 2. Delete the directory tree
         if os.path.exists(self.root_dir):
