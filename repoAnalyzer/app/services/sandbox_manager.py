@@ -7,7 +7,24 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from app.core.logging import get_logger
 
+import re
+
 logger = get_logger("sandbox_manager")
+
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_session_id_security(session_id: str) -> str:
+    """
+    Strictly validates session_id to prevent directory traversal and injection.
+    Only alphanumeric characters, dashes, and underscores up to 64 chars are permitted.
+    """
+    clean = (session_id or "").strip()
+    if not clean or not SESSION_ID_REGEX.match(clean) or ".." in clean or "/" in clean or "\\" in clean:
+        raise SandboxError(
+            f"Security violation: Invalid session ID format '{session_id}'. Path traversal characters detected."
+        )
+    return clean
 
 
 class SandboxError(Exception):
@@ -24,17 +41,27 @@ class SessionSandbox:
     """
 
     def __init__(self, session_id: str, base_dir: Optional[str] = None):
-        self.session_id = session_id
+        clean_id = validate_session_id_security(session_id)
+        self.session_id = clean_id
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.closed_at: Optional[str] = None
         self.status: str = "created"  # created, active, closed
 
-        # Base directory for sandboxes
-        if base_dir:
-            self.root_dir = os.path.join(base_dir, f"sandbox_{session_id}")
-        else:
-            self.root_dir = os.path.join(tempfile.gettempdir(), "repo_sandboxes", f"sandbox_{session_id}")
+        # Base directory for sandboxes with strict canonical path resolution
+        resolved_base = os.path.realpath(os.path.abspath(base_dir or os.path.join(tempfile.gettempdir(), "repo_sandboxes")))
+        candidate_root = os.path.realpath(os.path.abspath(os.path.join(resolved_base, f"sandbox_{clean_id}")))
 
+        # Enforce sandbox boundary verification (strictly prevents path traversal)
+        try:
+            common = os.path.commonpath([resolved_base, candidate_root])
+            if common != resolved_base or candidate_root == resolved_base:
+                raise SandboxError(
+                    f"Security violation: Sandbox root '{candidate_root}' escapes boundary '{resolved_base}'."
+                )
+        except ValueError:
+            raise SandboxError("Security violation: Invalid drive or path configuration.")
+
+        self.root_dir = candidate_root
         self.repo_dir: Optional[str] = None
         self.working_dir: Optional[str] = None
         self.active_processes: list[asyncio.subprocess.Process] = []
@@ -279,12 +306,18 @@ class SessionSandboxManager:
         return sandbox
 
     def get_sandbox(self, session_id: str) -> Optional[SessionSandbox]:
-        """Retrieve an active sandbox by session ID."""
-        return self._sandboxes.get(session_id)
+        """Retrieve an active sandbox by session ID with path traversal protection."""
+        clean = (session_id or "").strip()
+        if not clean or not SESSION_ID_REGEX.match(clean) or ".." in clean:
+            return None
+        return self._sandboxes.get(clean)
 
     async def close_sandbox(self, session_id: str) -> Optional[dict[str, Any]]:
-        """Close and delete a sandbox by session ID."""
-        sandbox = self._sandboxes.pop(session_id, None)
+        """Close and delete a sandbox by session ID with path traversal protection."""
+        clean = (session_id or "").strip()
+        if not clean or not SESSION_ID_REGEX.match(clean) or ".." in clean:
+            return None
+        sandbox = self._sandboxes.pop(clean, None)
         if sandbox:
             return await sandbox.close()
         return None

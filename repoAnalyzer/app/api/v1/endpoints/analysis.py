@@ -25,8 +25,7 @@ from app.schemas.analysis import (
     SandboxStatsResponse,
 )
 from app.services.git_cloner import clone_repository_into_sandbox, GitCloneError
-from app.services.sandbox_manager import sandbox_manager, SandboxError
-
+from app.services.sandbox_manager import sandbox_manager, SandboxError, validate_session_id_security
 from app.services.agent_runner import agent_runner, AgentRunnerError
 
 
@@ -455,7 +454,15 @@ async def generate_report_endpoint(payload: GenerateReportRequest) -> GenerateRe
 )
 async def get_sandbox_stats(session_id: str) -> SandboxStatsResponse:
     """Retrieve stats for an active session sandbox."""
-    sandbox = sandbox_manager.get_sandbox(session_id)
+    try:
+        clean_id = validate_session_id_security(session_id)
+    except SandboxError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Security violation: Invalid session ID format '{session_id}'. Path traversal characters are strictly forbidden.",
+        )
+
+    sandbox = sandbox_manager.get_sandbox(clean_id)
     if not sandbox:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -475,7 +482,15 @@ async def get_sandbox_stats(session_id: str) -> SandboxStatsResponse:
 )
 async def close_sandbox_endpoint(session_id: str) -> SandboxCloseResponse:
     """Explicitly destroy and wipe a session sandbox."""
-    result = await sandbox_manager.close_sandbox(session_id)
+    try:
+        clean_id = validate_session_id_security(session_id)
+    except SandboxError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Security violation: Invalid session ID format '{session_id}'. Path traversal characters are strictly forbidden.",
+        )
+
+    result = await sandbox_manager.close_sandbox(clean_id)
     if not result:
         return SandboxCloseResponse(
             session_id=session_id,

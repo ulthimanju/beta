@@ -4,6 +4,17 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+SESSION_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_safe_session_id(v: str) -> str:
+    """Validate that session_id contains only alphanumeric characters, dashes, and underscores without traversal."""
+    clean = (v or "").strip()
+    if not clean or not SESSION_ID_REGEX.match(clean) or ".." in clean or "/" in clean or "\\" in clean:
+        raise ValueError("Invalid session ID format. Path traversal characters are strictly forbidden.")
+    return clean
+
+
 def validate_github_repo_url(v: str) -> str:
     """Validate that the given URL is strictly a valid public GitHub URL."""
     clean_url = v.strip().rstrip("/")
@@ -49,6 +60,11 @@ class CloneRepoRequest(BaseModel):
     """Schema for requesting repository clone in Step 2."""
     session_id: str = Field(..., description="Unique session ID from Step 1")
     repo_url: str = Field(..., description="Target repository URL verified in Step 1")
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
 
     @field_validator("repo_url")
     @classmethod
@@ -105,6 +121,11 @@ class SetWorkingDirRequest(BaseModel):
         description="Optional relative subpath inside the sandbox (defaults to cloned repo directory)",
     )
 
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
+
 
 class SetWorkingDirResponse(BaseModel):
     """Schema for response when working directory is validated and set."""
@@ -130,6 +151,11 @@ class InvokeAgentRequest(BaseModel):
         None,
         description="Optional custom terminal flags passed to the agent CLI invocation",
     )
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
 
 
 class InvokeAgentResponse(BaseModel):
@@ -160,6 +186,11 @@ class DispatchQueryRequest(BaseModel):
         None,
         description="Optional model override (defaults to agent's default model: gemini-3.8-flash-medium)",
     )
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
 
 
 class DispatchQueryResponse(BaseModel):
@@ -195,6 +226,11 @@ class LoadSkillRequest(BaseModel):
         default="repo-analyzer",
         description="Name of the skill to load and apply",
     )
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
 
 
 class LoadSkillResponse(BaseModel):
@@ -237,6 +273,11 @@ class PerformAnalysisRequest(BaseModel):
     session_id: str = Field(..., description="Unique session ID from previous steps")
     deep_scan: bool = Field(default=True, description="Execute full codebase inspection")
 
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
+
 
 class PerformAnalysisResponse(BaseModel):
     """Schema for response when repository analysis is performed (Step 7)."""
@@ -267,6 +308,11 @@ class PerformAnalysisResponse(BaseModel):
 class GenerateReportRequest(BaseModel):
     """Schema for Step 8: Generating formatted output per repo-analyzer specifications."""
     session_id: str = Field(..., description="Unique session ID from previous steps")
+
+    @field_validator("session_id")
+    @classmethod
+    def validate_session(cls, v: str) -> str:
+        return validate_safe_session_id(v)
 
 
 class GenerateReportResponse(BaseModel):
