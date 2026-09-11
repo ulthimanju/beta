@@ -158,10 +158,17 @@ async def clone_repository_endpoint(payload: CloneRepoRequest) -> CloneRepoRespo
     try:
         clone_result = await clone_repository_into_sandbox(repo_url=repo_url, session_id=session_id)
     except GitCloneError as e:
-        logger.error("Step 2 failed during sandbox clone", session_id=session_id, error=str(e))
+        err_str = str(e)
+        if "Security violation" in err_str:
+            err_status = status.HTTP_400_BAD_REQUEST
+        elif "timed out" in err_str.lower():
+            err_status = status.HTTP_504_GATEWAY_TIMEOUT
+        else:
+            err_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST if "Security violation" in str(e) else status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Step 2 Sandbox Clone Failure: {str(e)}",
+            status_code=err_status,
+            detail=f"Step 2 Sandbox Clone Failure: {err_str}",
         )
 
     return CloneRepoResponse(
