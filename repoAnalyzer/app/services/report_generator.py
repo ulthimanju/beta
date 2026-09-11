@@ -43,25 +43,52 @@ class ReportGenerator:
         branch = getattr(sandbox, "branch", "main")
         analyzed_at = datetime.now(timezone.utc).isoformat()
 
-        exec_summary = analysis["executive_summary"]
-        overall_score = analysis["overall_score"]
-        grade = analysis["grade"]
-        arch_pattern = analysis["primary_architecture_pattern"]
-        primary_lang = analysis["primary_language"]
-        secondary_langs = analysis.get("secondary_languages", [])
-        pillars = analysis["pillars"]
+        exec_summary = analysis.get("executive_summary") or analysis.get("executiveSummary") or ""
+        overall_score = analysis.get("overall_score")
+        if overall_score is None and isinstance(analysis.get("metadata"), dict):
+            overall_score = analysis["metadata"].get("overallScore")
+        if overall_score is None:
+            overall_score = analysis.get("overallScore", 0)
 
-        # 1. Build Raw Markdown Synthesis
-        raw_markdown = self._synthesize_markdown(
-            repo_name=repo_name,
-            overall_score=overall_score,
-            grade=grade,
-            arch_pattern=arch_pattern,
-            primary_lang=primary_lang,
-            secondary_langs=secondary_langs,
-            exec_summary=exec_summary,
-            pillars=pillars,
-        )
+        grade = analysis.get("grade")
+        if not grade and isinstance(analysis.get("metadata"), dict):
+            grade = analysis["metadata"].get("grade")
+        if not grade:
+            grade = analysis.get("grade", "B")
+
+        arch_pattern = analysis.get("primary_architecture_pattern")
+        if not arch_pattern and isinstance(analysis.get("metadata"), dict):
+            arch_pattern = analysis["metadata"].get("primaryArchitecturePattern")
+        if not arch_pattern:
+            arch_pattern = analysis.get("primaryArchitecturePattern", "Modular Architecture")
+
+        primary_lang = analysis.get("primary_language")
+        if not primary_lang and isinstance(analysis.get("metadata"), dict):
+            primary_lang = analysis["metadata"].get("primaryLanguage")
+        if not primary_lang:
+            primary_lang = analysis.get("primaryLanguage", "Unknown")
+
+        secondary_langs = analysis.get("secondary_languages")
+        if secondary_langs is None and isinstance(analysis.get("metadata"), dict):
+            secondary_langs = analysis["metadata"].get("secondaryLanguages")
+        if secondary_langs is None:
+            secondary_langs = analysis.get("secondaryLanguages", [])
+
+        pillars = analysis.get("pillars", [])
+
+        # 1. Build Raw Markdown Synthesis (prefer AI-generated rawMarkdown if present)
+        raw_markdown = analysis.get("raw_markdown") or analysis.get("rawMarkdown")
+        if not raw_markdown:
+            raw_markdown = self._synthesize_markdown(
+                repo_name=repo_name,
+                overall_score=overall_score,
+                grade=grade,
+                arch_pattern=arch_pattern,
+                primary_lang=primary_lang,
+                secondary_langs=secondary_langs,
+                exec_summary=exec_summary,
+                pillars=pillars,
+            )
 
         # 2. Build Schema-Compliant JSON matching schemas/report_schema.json
         schema_json: dict[str, Any] = {

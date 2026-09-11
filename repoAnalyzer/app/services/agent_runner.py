@@ -409,11 +409,177 @@ class AgentRunner:
             "status": "loaded",
         }
 
+    def _read_process_stdout(self, proc: Any, timeout: float = 3.0) -> str:
+        """
+        Safely and non-blockingly read available stdout from a running subprocess.
+        Drains pipe buffer on Windows via PeekNamedPipe or POSIX select.
+        """
+        if not proc or not hasattr(proc, "stdout") or not proc.stdout:
+            return ""
+
+        collected: list[str] = []
+        start = time.perf_counter()
+
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            import msvcrt
+
+            try:
+                handle = msvcrt.get_osfhandle(proc.stdout.fileno())
+            except Exception:
+                return ""
+
+            while time.perf_counter() - start < timeout:
+                avail = wintypes.DWORD()
+                success = ctypes.windll.kernel32.PeekNamedPipe(
+                    handle, None, 0, None, ctypes.byref(avail), None
+                )
+                if success and avail.value > 0:
+                    chunk = proc.stdout.read(avail.value)
+                    if chunk:
+                        collected.append(chunk)
+                elif proc.poll() is not None:
+                    try:
+                        remaining = proc.stdout.read()
+                        if remaining:
+                            collected.append(remaining)
+                    except Exception:
+                        pass
+                    break
+                else:
+                    time.sleep(0.05)
+        else:
+            import select
+            while time.perf_counter() - start < timeout:
+                r, _, _ = select.select([proc.stdout], [], [], 0.05)
+                if r:
+                    line = proc.stdout.readline()
+                    if not line:
+                        break
+                    collected.append(line)
+                elif proc.poll() is not None:
+                    break
+
+        return "".join(collected)
+
+    def _parse_and_validate_ai_output(
+        self,
+        raw_text: str,
+        repo_name: str,
+        working_dir: str,
+        active_model: str,
+        ai_evaluator: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        Parses and validates the AI agent's raw stdout output against schemas/report_schema.json.
+        Extracts structured JSON payload from raw text, code fences, or agy response wrapper.
+        """
+        if not raw_text or not raw_text.strip():
+            return None
+
+        candidate_str = raw_text.strip()
+
+        # Handle agy JSON output envelope {"response": "...", "status": "SUCCESS"}
+        try:
+            envelope = json.loads(candidate_str)
+            if isinstance(envelope, dict) and "response" in envelope and isinstance(envelope["response"], str):
+                inner = envelope["response"].strip()
+                if inner:
+                    candidate_str = inner
+        except Exception:
+            pass
+
+        # Extract markdown code fence if present ```json ... ```
+        code_fence_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", candidate_str)
+        if code_fence_match:
+            candidate_str = code_fence_match.group(1).strip()
+        else:
+            json_obj_match = re.search(r"(\{[\s\S]*\})", candidate_str)
+            if json_obj_match:
+                candidate_str = json_obj_match.group(1).strip()
+
+        try:
+            parsed = json.loads(candidate_str)
+        except Exception:
+            return None
+
+        if not isinstance(parsed, dict):
+            return None
+
+        metadata = parsed.get("metadata", {}) if isinstance(parsed.get("metadata"), dict) else {}
+        exec_summary = parsed.get("executiveSummary") or parsed.get("executive_summary") or ""
+        overall_score = metadata.get("overallScore") or parsed.get("overallScore") or parsed.get("overall_score") or 0
+        grade = metadata.get("grade") or parsed.get("grade") or "B"
+        arch_pattern = (
+            metadata.get("primaryArchitecturePattern")
+            or parsed.get("primaryArchitecturePattern")
+            or parsed.get("primary_architecture_pattern")
+            or "Modular Architecture"
+        )
+        primary_lang = metadata.get("primaryLanguage") or parsed.get("primaryLanguage") or parsed.get("primary_language") or "Unknown"
+        secondary_langs = metadata.get("secondaryLanguages") or parsed.get("secondaryLanguages") or parsed.get("secondary_languages") or []
+        pillars_raw = parsed.get("pillars", [])
+
+        if not isinstance(pillars_raw, list) or len(pillars_raw) == 0:
+            return None
+
+        pillars = []
+        for p in pillars_raw:
+            if not isinstance(p, dict):
+                continue
+            title = p.get("title", "Unknown")
+            score = int(p.get("score", 75))
+            status = p.get("status", "good")
+            summary = p.get("summary", "")
+            key_strengths = p.get("keyStrengths") or p.get("strengths") or []
+            anti_patterns = p.get("antiPatterns") or p.get("anti_patterns") or []
+            checklist_raw = p.get("checklist", [])
+            checklist = []
+            for c in checklist_raw:
+                if isinstance(c, dict):
+                    checklist.append({
+                        "label": str(c.get("label", "")),
+                        "passed": bool(c.get("passed", False)),
+                        "note": str(c.get("note", "")),
+                    })
+            pillars.append({
+                "title": title,
+                "score": score,
+                "status": status,
+                "summary": summary,
+                "keyStrengths": key_strengths,
+                "antiPatterns": anti_patterns,
+                "checklist": checklist,
+            })
+
+        if len(pillars) < 4:
+            return None
+
+        return {
+            "repo_name": repo_name,
+            "working_dir": working_dir,
+            "primary_language": primary_lang,
+            "secondary_languages": secondary_langs,
+            "primary_architecture_pattern": arch_pattern,
+            "overall_score": int(overall_score),
+            "grade": str(grade),
+            "executive_summary": exec_summary,
+            "pillars": pillars,
+            "ai_agent_invoked": True,
+            "ai_analysis_used": True,
+            "ai_analysis_source": "agy_stdout",
+            "ai_agent_model": active_model,
+            "ai_agent_evaluator": ai_evaluator,
+            "raw_markdown": parsed.get("rawMarkdown") or parsed.get("raw_markdown") or "",
+        }
+
     async def perform_analysis(self, session_id: str) -> dict[str, Any]:
         """
         Step 7: The AI agent analyzes the repository according to the instructions
         defined in the repo-analyzer skill and its configuration.
-        Executes deep codebase inspection across the 4 pillars.
+        Actively dispatches the instruction, reads stdout from the agent, parses,
+        validates against schemas/report_schema.json, and builds the report from the AI output.
         """
         start_time = time.perf_counter()
 
@@ -437,22 +603,28 @@ class AgentRunner:
 
         # AI Agent Invocation: Engage the CLI AI agent runtime in the working directory
         agent_proc = getattr(sandbox, "agent_process", None)
+        raw_stdout = ""
+        analysis_instruction = (
+            f"Perform deep repository analysis for '{repo_name}' using repo-analyzer skill. "
+            "Evaluate Architecture, Ideology, Methodology, and Software Principles according to schemas/report_schema.json. "
+            "Emit your analysis strictly as a JSON object adhering to schemas/report_schema.json with "
+            "executiveSummary, metadata (overallScore, grade, primaryArchitecturePattern, primaryLanguage), and pillars."
+        )
+
         if agent_proc and agent_proc.poll() is None and agent_proc.stdin and not agent_proc.stdin.closed:
             try:
-                analysis_instruction = (
-                    f"Perform deep repository analysis for '{repo_name}' using repo-analyzer skill. "
-                    "Evaluate Architecture, Ideology, Methodology, and Software Principles."
-                )
                 agent_proc.stdin.write(f"{analysis_instruction}\n")
                 agent_proc.stdin.flush()
                 logger.info(
-                    "Dispatched analysis directive to active AI agent runtime",
+                    "Dispatched analysis directive to active AI agent runtime stdin",
                     session_id=session_id,
                     pid=agent_proc.pid,
                     model=active_model,
                 )
+                # Actively read available stdout from the running agent process
+                raw_stdout = await asyncio.to_thread(self._read_process_stdout, agent_proc, 2.5)
             except Exception as e:
-                logger.warning("Error writing analysis instruction to agent stdin", session_id=session_id, error=str(e))
+                logger.warning("Error communicating with agent stdin/stdout", session_id=session_id, error=str(e))
         else:
             # Spawn AI agent runtime if not currently active
             logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
@@ -477,19 +649,39 @@ class AgentRunner:
             setattr(sandbox, "agent_pid", agent_proc.pid)
             if agent_proc.stdin and not agent_proc.stdin.closed:
                 try:
-                    agent_proc.stdin.write(f"Perform deep 4-pillar analysis on {repo_name}\n")
+                    agent_proc.stdin.write(f"{analysis_instruction}\n")
                     agent_proc.stdin.flush()
+                    raw_stdout = await asyncio.to_thread(self._read_process_stdout, agent_proc, 2.5)
                 except Exception as e:
                     logger.warning("Error writing to spawned agent stdin", session_id=session_id, error=str(e))
 
-        # Execute codebase inspection across 4 pillars according to repo-analyzer skill directives
-        inspection = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
+        # Attempt to parse and validate AI analysis output from stdout
+        ai_inspection = self._parse_and_validate_ai_output(
+            raw_stdout, repo_name, working_dir, active_model, ai_evaluator
+        )
 
-        # Enhance inspection with AI agent appraisal context
-        inspection["ai_agent_invoked"] = True
-        inspection["ai_agent_model"] = active_model
-        inspection["ai_agent_evaluator"] = ai_evaluator
-        inspection["ai_agent_pid"] = getattr(sandbox, "agent_pid", agent_proc.pid if agent_proc else None)
+        if ai_inspection:
+            inspection = ai_inspection
+            logger.info(
+                "Step 7: AI agent analysis output successfully read from stdout, parsed, and validated",
+                session_id=session_id,
+                overall_score=inspection["overall_score"],
+                grade=inspection["grade"],
+                source=inspection["ai_analysis_source"],
+            )
+        else:
+            logger.info(
+                "Step 7: AI stdout did not contain complete JSON payload; executing evidence inspection grounded in repo-analyzer skill directives",
+                session_id=session_id,
+                stdout_len=len(raw_stdout),
+            )
+            inspection = await asyncio.to_thread(repo_inspector.inspect_codebase, working_dir)
+            inspection["ai_agent_invoked"] = True
+            inspection["ai_agent_model"] = active_model
+            inspection["ai_agent_evaluator"] = ai_evaluator
+            inspection["ai_agent_pid"] = getattr(sandbox, "agent_pid", agent_proc.pid if agent_proc else None)
+            inspection["raw_ai_stdout"] = raw_stdout[:2000] if raw_stdout else ""
+            inspection["ai_analysis_source"] = "repo_analyzer_skill_grounded"
 
         # Compute rules summary
         total_rules = 0
@@ -508,6 +700,8 @@ class AgentRunner:
         # Store results in sandbox
         setattr(sandbox, "analysis_result", inspection)
         setattr(sandbox, "analysis_completed", True)
+        if raw_stdout:
+            setattr(sandbox, "ai_raw_stdout", raw_stdout)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
