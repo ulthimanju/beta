@@ -409,11 +409,43 @@ class AgentRunner:
             "status": "loaded",
         }
 
-    def _read_process_stdout(self, proc: Any, timeout: float = 3.0) -> str:
+    async def _wait_for_agent_output(self, sandbox: Any, timeout: float = 3.0) -> str:
         """
-        Safely and non-blockingly read available stdout from a running subprocess.
-        Drains pipe buffer on Windows via PeekNamedPipe or POSIX select.
+        Polls the background stream consumer for accumulated stdout until either
+        output is produced or timeout expires. Returns all collected stdout.
         """
+        if not sandbox:
+            return ""
+
+        start = time.perf_counter()
+        initial_len = len(sandbox.get_agent_stdout())
+
+        while time.perf_counter() - start < timeout:
+            current_out = sandbox.get_agent_stdout()
+            if len(current_out) > initial_len:
+                # Output has started flowing, give a brief moment for any pending chunks
+                await asyncio.sleep(0.3)
+                return sandbox.get_agent_stdout()
+            # If agent finished running, return immediately
+            proc = getattr(sandbox, "agent_process", None)
+            if proc and proc.poll() is not None:
+                await asyncio.sleep(0.05)
+                return sandbox.get_agent_stdout()
+            await asyncio.sleep(0.1)
+
+        return sandbox.get_agent_stdout()
+
+    def _read_process_stdout(self, proc: Any, timeout: float = 3.0, sandbox: Optional[Any] = None) -> str:
+        """
+        Safely retrieve available stdout from a running subprocess.
+        Checks sandbox background stream consumer first, otherwise non-blocking pipe read.
+        """
+        if sandbox and hasattr(sandbox, "get_process_stdout"):
+            pid = getattr(proc, "pid", None)
+            buffered = sandbox.get_process_stdout(pid)
+            if buffered:
+                return buffered
+
         if not proc or not hasattr(proc, "stdout") or not proc.stdout:
             return ""
 
@@ -621,10 +653,8 @@ class AgentRunner:
                     pid=agent_proc.pid,
                     model=active_model,
                 )
-                # Actively read available stdout from the running agent process
-                raw_stdout = await asyncio.to_thread(self._read_process_stdout, agent_proc, 2.5)
             except Exception as e:
-                logger.warning("Error communicating with agent stdin/stdout", session_id=session_id, error=str(e))
+                logger.warning("Error communicating with agent stdin", session_id=session_id, error=str(e))
         else:
             # Spawn AI agent runtime if not currently active
             logger.info("Spawning CLI AI agent runtime for Step 7 analysis execution", session_id=session_id)
@@ -651,9 +681,19 @@ class AgentRunner:
                 try:
                     agent_proc.stdin.write(f"{analysis_instruction}\n")
                     agent_proc.stdin.flush()
-                    raw_stdout = await asyncio.to_thread(self._read_process_stdout, agent_proc, 2.5)
                 except Exception as e:
                     logger.warning("Error writing to spawned agent stdin", session_id=session_id, error=str(e))
+
+        # Await AI agent stdout output from background stream consumer
+        raw_stdout = await self._wait_for_agent_output(sandbox, timeout=3.0)
+        raw_stderr = sandbox.get_agent_stderr()
+        if raw_stderr:
+            logger.info(
+                "Captured AI agent stderr in background stream consumer",
+                session_id=session_id,
+                stderr_len=len(raw_stderr),
+                sample=raw_stderr[:200],
+            )
 
         # Attempt to parse and validate AI analysis output from stdout
         ai_inspection = self._parse_and_validate_ai_output(

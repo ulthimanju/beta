@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -49,6 +50,87 @@ class SandboxError(Exception):
     pass
 
 
+class ProcessStreamConsumer:
+    """
+    Asynchronously consumes and buffers stdout and stderr for a subprocess in background daemon threads.
+    Completely prevents OS pipe buffer exhaustion (typically 64KB on Linux/Windows) which would otherwise
+    cause the child process to block indefinitely on sys.stdout.write() / sys.stderr.write().
+    """
+
+    def __init__(self, proc: Any, max_buffer_size: int = 10 * 1024 * 1024):
+        self.proc = proc
+        self.max_buffer_size = max_buffer_size
+        self._stdout_chunks: list[str] = []
+        self._stderr_chunks: list[str] = []
+        self._stdout_len = 0
+        self._stderr_len = 0
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._stdout_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+
+        self.start()
+
+    def start(self) -> None:
+        """Start background daemon reader threads for proc.stdout and proc.stderr."""
+        if hasattr(self.proc, "stdout") and self.proc.stdout:
+            self._stdout_thread = threading.Thread(
+                target=self._reader,
+                args=(self.proc.stdout, "stdout"),
+                daemon=True,
+                name=f"stdout-consumer-{getattr(self.proc, 'pid', 'unknown')}",
+            )
+            self._stdout_thread.start()
+
+        if hasattr(self.proc, "stderr") and self.proc.stderr:
+            self._stderr_thread = threading.Thread(
+                target=self._reader,
+                args=(self.proc.stderr, "stderr"),
+                daemon=True,
+                name=f"stderr-consumer-{getattr(self.proc, 'pid', 'unknown')}",
+            )
+            self._stderr_thread.start()
+
+    def _reader(self, stream: Any, stream_type: str) -> None:
+        """Continuously reads from stream in chunks until EOF or stop event."""
+        try:
+            while not self._stop_event.is_set():
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                if isinstance(chunk, bytes):
+                    chunk = chunk.decode("utf-8", errors="replace")
+                with self._lock:
+                    if stream_type == "stdout":
+                        self._stdout_chunks.append(chunk)
+                        self._stdout_len += len(chunk)
+                        while self._stdout_chunks and self._stdout_len > self.max_buffer_size:
+                            popped = self._stdout_chunks.pop(0)
+                            self._stdout_len -= len(popped)
+                    else:
+                        self._stderr_chunks.append(chunk)
+                        self._stderr_len += len(chunk)
+                        while self._stderr_chunks and self._stderr_len > self.max_buffer_size:
+                            popped = self._stderr_chunks.pop(0)
+                            self._stderr_len -= len(popped)
+        except Exception:
+            pass
+
+    def get_stdout(self) -> str:
+        """Return all collected stdout so far as a string."""
+        with self._lock:
+            return "".join(self._stdout_chunks)
+
+    def get_stderr(self) -> str:
+        """Return all collected stderr so far as a string."""
+        with self._lock:
+            return "".join(self._stderr_chunks)
+
+    def stop(self) -> None:
+        """Signal reader threads to stop."""
+        self._stop_event.set()
+
+
 class SessionSandbox:
     """
     Represents an isolated, ephemeral session sandbox.
@@ -84,18 +166,51 @@ class SessionSandbox:
         self.active_processes: list[Any] = []
         self.agent_process: Optional[Any] = None
         self.agent_pid: Optional[int] = None
+        self._stream_consumers: dict[int, ProcessStreamConsumer] = {}
 
     def register_process(self, proc: Any) -> None:
         """
         Register a running process in this sandbox for lifecycle tracking and cleanup.
-        Ensures active_processes tracks the process and agent_process is bound.
+        Ensures active_processes tracks the process, agent_process is bound,
+        and background stream consumers are started to prevent pipe buffer deadlocks.
         """
         if proc is not None:
             if proc not in self.active_processes:
                 self.active_processes.append(proc)
             self.agent_process = proc
-            if hasattr(proc, "pid"):
-                self.agent_pid = proc.pid
+            pid = getattr(proc, "pid", None)
+            if pid:
+                self.agent_pid = pid
+                if pid not in self._stream_consumers:
+                    consumer = ProcessStreamConsumer(proc)
+                    self._stream_consumers[pid] = consumer
+                    logger.info(
+                        "Started background stdout/stderr stream consumer for process",
+                        session_id=self.session_id,
+                        pid=pid,
+                    )
+
+    def get_process_stdout(self, pid: Optional[int] = None) -> str:
+        """Retrieve accumulated stdout for a specific process or the current agent process."""
+        target_pid = pid or self.agent_pid
+        if target_pid and target_pid in self._stream_consumers:
+            return self._stream_consumers[target_pid].get_stdout()
+        return ""
+
+    def get_process_stderr(self, pid: Optional[int] = None) -> str:
+        """Retrieve accumulated stderr for a specific process or the current agent process."""
+        target_pid = pid or self.agent_pid
+        if target_pid and target_pid in self._stream_consumers:
+            return self._stream_consumers[target_pid].get_stderr()
+        return ""
+
+    def get_agent_stdout(self) -> str:
+        """Convenience method to retrieve stdout from the current agent process."""
+        return self.get_process_stdout()
+
+    def get_agent_stderr(self) -> str:
+        """Convenience method to retrieve stderr from the current agent process."""
+        return self.get_process_stderr()
 
     def initialize(self) -> str:
         """Create the isolated sandbox directory on disk."""
@@ -312,6 +427,8 @@ class SessionSandbox:
             "working_dir": self.get_working_directory(),
             "total_files": total_files,
             "size_bytes": total_size,
+            "stdout_bytes": len(self.get_agent_stdout()),
+            "stderr_bytes": len(self.get_agent_stderr()),
             "created_at": self.created_at,
             "closed_at": self.closed_at,
         }
@@ -319,11 +436,19 @@ class SessionSandbox:
     async def close(self) -> dict[str, Any]:
         """
         Close and destroy the sandbox:
-        1. Terminate any active subprocesses.
+        1. Stop background stream consumers and terminate any active subprocesses.
         2. Completely remove sandbox directory and all files from disk.
         3. Mark status as closed.
         """
         logger.info("Closing and cleaning up sandbox", session_id=self.session_id, path=self.root_dir)
+
+        # 0. Stop background stream consumers
+        for pid, consumer in list(self._stream_consumers.items()):
+            try:
+                consumer.stop()
+            except Exception:
+                pass
+        self._stream_consumers.clear()
 
         # 1. Terminate any active processes
         procs_to_terminate: list[Any] = list(self.active_processes)
@@ -344,16 +469,7 @@ class SessionSandbox:
                 if is_running:
                     logger.info("Terminating sandbox process", session_id=self.session_id, pid=pid)
 
-                    # Close standard streams to prevent pipe deadlock and resource locking
-                    for stream_name in ("stdin", "stdout", "stderr"):
-                        stream = getattr(proc, stream_name, None)
-                        if stream and hasattr(stream, "close") and not getattr(stream, "closed", True):
-                            try:
-                                stream.close()
-                            except Exception:
-                                pass
-
-                    # Attempt graceful termination
+                    # 1. Attempt graceful termination first
                     try:
                         proc.terminate()
                     except (ProcessLookupError, OSError):
@@ -367,7 +483,7 @@ class SessionSandbox:
                         if hasattr(proc, "returncode") and proc.returncode is not None:
                             break
 
-                    # Force kill if still running
+                    # 2. Force kill if still running
                     still_alive = False
                     if hasattr(proc, "poll"):
                         still_alive = (proc.poll() is None)
@@ -380,7 +496,7 @@ class SessionSandbox:
                         except (ProcessLookupError, OSError):
                             pass
 
-                    # On Windows, kill process tree by PID to eliminate orphan child processes
+                    # 3. On Windows, force-kill full process tree by PID to eliminate stubborn child processes
                     if os.name == "nt" and pid:
                         try:
                             subprocess.run(
@@ -392,9 +508,18 @@ class SessionSandbox:
                         except Exception:
                             pass
 
-                    # Final poll to reap process
+                    # 4. Final poll to reap process
                     if hasattr(proc, "poll"):
                         proc.poll()
+
+                    # 5. Now that process is terminated, safely close standard streams
+                    for stream_name in ("stdin", "stdout", "stderr"):
+                        stream = getattr(proc, stream_name, None)
+                        if stream and hasattr(stream, "close") and not getattr(stream, "closed", True):
+                            try:
+                                stream.close()
+                            except Exception:
+                                pass
             except Exception as e:
                 logger.warning("Error terminating sandbox process", session_id=self.session_id, error=str(e))
 
