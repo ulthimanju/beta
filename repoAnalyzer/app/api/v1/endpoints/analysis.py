@@ -289,12 +289,15 @@ async def dispatch_query_endpoint(payload: DispatchQueryRequest) -> DispatchQuer
         model_used=result["model_used"],
         working_dir=result["working_dir"],
         skill_name=result["skill_name"],
+        communication_mode=result.get("communication_mode", "stdin_stream"),
+        agent_pid=result.get("agent_pid"),
+        bytes_sent=result.get("bytes_sent"),
         status="dispatched",
         step=5,
         step_title="Dispatch Query",
         timestamp=result["timestamp"],
         duration_ms=result["duration_ms"],
-        message=f"Step 5 Successful: Query '{result['query']}' dispatched to CLI AI agent using default model '{result['model_used']}' with '{result['skill_name']}' skill mounted in sandbox.",
+        message=f"Step 5 Successful: Query '{result['query']}' dispatched via {result.get('communication_mode', 'stdin_stream')} to CLI AI agent (PID: {result.get('agent_pid')}) using model '{result['model_used']}' with '{result['skill_name']}' skill mounted in sandbox.",
     )
 
 

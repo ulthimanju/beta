@@ -179,15 +179,74 @@ class AgentRunner:
         setattr(sandbox, "active_model", active_model)
         setattr(sandbox, "mounted_skill_dir", mounted_skill_dir)
 
-        # Dispatch query to active agent process stdin if running
+        # Active process communication: send query to CLI AI agent stdin
         agent_proc = getattr(sandbox, "agent_process", None)
-        if agent_proc and agent_proc.stdin and not agent_proc.stdin.closed:
+        communication_mode = "stdin_stream"
+        bytes_sent = len(query.encode("utf-8"))
+        agent_pid = getattr(sandbox, "agent_pid", None)
+
+        if agent_proc and agent_proc.poll() is None and agent_proc.stdin and not agent_proc.stdin.closed:
             try:
                 agent_proc.stdin.write(f"{query}\n")
                 agent_proc.stdin.flush()
-                logger.info("Dispatched prompt to agent stdin", session_id=session_id, query=query)
+                agent_pid = agent_proc.pid
+                logger.info(
+                    "Actively dispatched query to running AI agent process stdin",
+                    session_id=session_id,
+                    pid=agent_pid,
+                    query=query,
+                    bytes_sent=bytes_sent,
+                )
             except Exception as e:
-                logger.warning("Could not write query to agent stdin", session_id=session_id, error=str(e))
+                logger.warning("Error writing query to agent stdin", session_id=session_id, error=str(e))
+                communication_mode = "stdin_error"
+        else:
+            # If no active agent process is running, spawn dedicated CLI agent subprocess for query dispatch
+            logger.info(
+                "No persistent agent process running; spawning dedicated agent CLI subprocess for query dispatch",
+                session_id=session_id,
+                working_dir=working_dir,
+            )
+            binary_path = self.resolve_binary()
+            cmd = [binary_path, "--dangerously-skip-permissions", "--model", active_model]
+            sanitized_env = dict(os.environ)
+            sanitized_env.pop("ANTIGRAVITY_AGENT", None)
+            sanitized_env["ANTIGRAVITY_SANDBOX_DIR"] = sandbox.root_dir
+            sanitized_env["ANTIGRAVITY_WORKING_DIR"] = working_dir
+
+            agent_proc = await asyncio.to_thread(
+                subprocess.Popen,
+                cmd,
+                cwd=working_dir,
+                env=sanitized_env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            sandbox.active_processes.append(agent_proc)
+            setattr(sandbox, "agent_process", agent_proc)
+            setattr(sandbox, "agent_pid", agent_proc.pid)
+            agent_pid = agent_proc.pid
+            communication_mode = "subprocess_invocation"
+
+            if agent_proc.stdin and not agent_proc.stdin.closed:
+                try:
+                    agent_proc.stdin.write(f"{query}\n")
+                    agent_proc.stdin.flush()
+                    logger.info(
+                        "Spawned agent subprocess and piped query to stdin",
+                        session_id=session_id,
+                        pid=agent_pid,
+                        query=query,
+                        bytes_sent=bytes_sent,
+                    )
+                except Exception as e:
+                    logger.warning("Error writing query to spawned agent stdin", session_id=session_id, error=str(e))
+
+        setattr(sandbox, "query_dispatched", True)
+        setattr(sandbox, "communication_mode", communication_mode)
+        setattr(sandbox, "bytes_sent", bytes_sent)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -199,6 +258,8 @@ class AgentRunner:
             model=active_model,
             skill="repo-analyzer",
             working_dir=working_dir,
+            communication_mode=communication_mode,
+            pid=agent_pid,
             duration_ms=duration_ms,
         )
 
@@ -208,6 +269,9 @@ class AgentRunner:
             "model_used": active_model,
             "working_dir": working_dir,
             "skill_name": "repo-analyzer",
+            "communication_mode": communication_mode,
+            "agent_pid": agent_pid,
+            "bytes_sent": bytes_sent,
             "timestamp": timestamp,
             "duration_ms": duration_ms,
             "status": "dispatched",

@@ -163,6 +163,9 @@ class DispatchQueryResponse(BaseModel):
     timestamp: str
     duration_ms: float
     message: str
+    communication_mode: Optional[str] = "stdin_stream"
+    agent_pid: Optional[int] = None
+    bytes_sent: Optional[int] = None
 
 
 class PillarRuleInfo(BaseModel):
