@@ -6,6 +6,7 @@ export interface WorkflowStep {
   shortDesc: string;
   detail: string;
   status: StepStatus;
+  startTime?: number;
   durationMs?: number;
 }
 

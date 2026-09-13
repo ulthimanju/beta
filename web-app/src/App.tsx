@@ -28,6 +28,7 @@ interface Step1Session {
   repoName: string;
   receivedAt: string;
   message: string;
+  durationMs?: number;
 }
 
 interface Step2CloneInfo {
@@ -49,6 +50,7 @@ interface Step3WorkingDirInfo {
   readmePresent: boolean;
   detectedFrameworks: string[];
   topLevelEntries: string[];
+  durationMs?: number;
 }
 
 interface Step4AgentInfo {
@@ -180,9 +182,10 @@ export function App() {
     // ==========================================
     // STEP 1: Receive & Validate Repository URL
     // ==========================================
+    const step1Start = Date.now();
     setCurrentStepIndex(0);
     setSteps((prev) =>
-      prev.map((s, i) => (i === 0 ? { ...s, status: "running" } : s))
+      prev.map((s, i) => (i === 0 ? { ...s, status: "running", startTime: step1Start } : s))
     );
 
     addLog("info", `[Step 1/8] Initiating Step 1: Receiving & validating repository URL...`);
@@ -227,9 +230,11 @@ export function App() {
       owner = data.owner;
       repoName = data.repo_name;
 
+      const step1Duration = Date.now() - step1Start;
+
       addLog("system", `[Step 1/8] Session generated: ${sessionId}`);
       addLog("system", `[Sandbox] Ephemeral Session Sandbox initialized for session ${sessionId.slice(0, 8)}.`);
-      addLog("info", `[Step 1/8] Repository verified: ${owner}/${repoName}`);
+      addLog("info", `[Step 1/8] Repository verified: ${owner}/${repoName} (${step1Duration}ms)`);
       addLog("agent", `[Step 1/8] Step 1 Complete: Repository URL received and Session Sandbox created.`);
 
       setStep1Session({
@@ -239,18 +244,20 @@ export function App() {
         repoName,
         receivedAt: data.received_at,
         message: data.message,
+        durationMs: step1Duration,
       });
 
-      // Mark Step 1 completed
+      // Mark Step 1 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 0 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 0 ? { ...s, status: "completed", durationMs: step1Duration } : s))
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "An unexpected error occurred.";
       addLog("warn", `[Step 1/8] Validation Failed: ${msg}`);
       setErrorMessage(msg);
+      const step1Duration = Date.now() - step1Start;
       setSteps((prev) =>
-        prev.map((s, i) => (i === 0 ? { ...s, status: "failed" } : s))
+        prev.map((s, i) => (i === 0 ? { ...s, status: "failed", durationMs: step1Duration } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -260,9 +267,10 @@ export function App() {
     // ==========================================
     // STEP 2: Clone Directly into Session Sandbox
     // ==========================================
+    const step2Start = Date.now();
     setCurrentStepIndex(1);
     setSteps((prev) =>
-      prev.map((s, i) => (i === 1 ? { ...s, status: "running" } : s))
+      prev.map((s, i) => (i === 1 ? { ...s, status: "running", startTime: step2Start } : s))
     );
 
     addLog("system", `[Step 2/8] Cloning target repository directly into Session Sandbox workspace...`);
@@ -315,15 +323,16 @@ export function App() {
 
       // Mark Step 2 completed
       setSteps((prev) =>
-        prev.map((s, i) => (i === 1 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 1 ? { ...s, status: "completed", durationMs: cloneData.duration_ms || (Date.now() - step2Start) } : s))
       );
 
       // ==========================================
       // STEP 3: Set Working Directory inside Sandbox
       // ==========================================
+      const step3Start = Date.now();
       setCurrentStepIndex(2);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 2 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 2 ? { ...s, status: "running", startTime: step3Start } : s))
       );
 
       addLog("system", `[Step 3/8] Configuring execution context: Setting cloned repository as active working directory...`);
@@ -357,11 +366,13 @@ export function App() {
         throw new Error(errDetail);
       }
 
+      const step3Duration = dirData.duration_ms || (Date.now() - step3Start);
+
       const stacks = dirData.detected_frameworks && dirData.detected_frameworks.length > 0
         ? dirData.detected_frameworks.join(", ")
         : "Standard codebase";
 
-      addLog("info", `[Step 3/8] Working directory verified & locked: ${dirData.working_dir}`);
+      addLog("info", `[Step 3/8] Working directory verified & locked: ${dirData.working_dir} (${step3Duration}ms)`);
       addLog("info", `[Step 3/8] Relative sandbox path: ./${dirData.relative_working_dir}`);
       addLog("info", `[Step 3/8] Git worktree verified: ${dirData.is_git_worktree ? "Yes (.git active)" : "No"}`);
       addLog("info", `[Step 3/8] Detected technology stack: ${stacks}`);
@@ -376,19 +387,21 @@ export function App() {
         readmePresent: dirData.readme_present,
         detectedFrameworks: dirData.detected_frameworks || [],
         topLevelEntries: dirData.top_level_entries || [],
+        durationMs: step3Duration,
       });
 
-      // Mark Step 3 completed
+      // Mark Step 3 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 2 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 2 ? { ...s, status: "completed", durationMs: step3Duration } : s))
       );
 
       // ==========================================
       // STEP 4: Execute CLI AI Agent Terminal Invocation
       // ==========================================
+      const step4Start = Date.now();
       setCurrentStepIndex(3);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 3 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 3 ? { ...s, status: "running", startTime: step4Start } : s))
       );
 
       addLog("system", `[Step 4/8] Executing terminal command to invoke CLI AI agent from repository directory...`);
@@ -422,10 +435,12 @@ export function App() {
         throw new Error(errDetail);
       }
 
+      const step4Duration = agentData.duration_ms || (Date.now() - step4Start);
+
       addLog("info", `[Step 4/8] Agent binary: ${agentData.agent_executable} (v${agentData.agent_version})`);
       addLog("info", `[Step 4/8] Terminal command: ${agentData.command}`);
       addLog("info", `[Step 4/8] Default model configured: ${agentData.default_model}`);
-      addLog("info", `[Step 4/8] Process active (PID: ${agentData.pid}) in ${agentData.duration_ms}ms.`);
+      addLog("info", `[Step 4/8] Process active (PID: ${agentData.pid}) in ${step4Duration}ms.`);
       addLog("agent", `[Step 4/8] Step 4 Complete: CLI AI agent runtime invoked and standing by for query dispatch.`);
 
       setStep4AgentInfo({
@@ -434,21 +449,22 @@ export function App() {
         command: agentData.command,
         defaultModel: agentData.default_model,
         pid: agentData.pid,
-        durationMs: agentData.duration_ms,
+        durationMs: step4Duration,
         status: agentData.status,
       });
 
-      // Mark Step 4 completed
+      // Mark Step 4 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 3 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 3 ? { ...s, status: "completed", durationMs: step4Duration } : s))
       );
 
       // ==========================================
       // STEP 5: Dispatch Query to CLI AI Agent
       // ==========================================
+      const step5Start = Date.now();
       setCurrentStepIndex(4);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 4 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 4 ? { ...s, status: "running", startTime: step5Start } : s))
       );
 
       addLog("system", `[Step 5/8] Dispatching query: "analyze this repo using repo-analyzer skill"...`);
@@ -488,7 +504,9 @@ export function App() {
         throw new Error(errDetail);
       }
 
-      addLog("info", `[Step 5/8] Query confirmed: "${queryData.query}"`);
+      const step5Duration = queryData.duration_ms || (Date.now() - step5Start);
+
+      addLog("info", `[Step 5/8] Query confirmed: "${queryData.query}" (${step5Duration}ms)`);
       addLog("info", `[Step 5/8] Model target: ${queryData.model_used} (default configured)`);
       addLog("info", `[Step 5/8] Skill target: ${queryData.skill_name} (mounted in sandbox)`);
       addLog("info", `[Step 5/8] Execution context: ${queryData.working_dir}`);
@@ -501,21 +519,22 @@ export function App() {
         workingDir: queryData.working_dir,
         skillName: queryData.skill_name,
         timestamp: queryData.timestamp,
-        durationMs: queryData.duration_ms,
+        durationMs: step5Duration,
         status: queryData.status,
       });
 
-      // Mark Step 5 completed
+      // Mark Step 5 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 4 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 4 ? { ...s, status: "completed", durationMs: step5Duration } : s))
       );
 
       // ==========================================
       // STEP 6: Load Skill (repo-analyzer)
       // ==========================================
+      const step6Start = Date.now();
       setCurrentStepIndex(5);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 5 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 5 ? { ...s, status: "running", startTime: step6Start } : s))
       );
 
       addLog("system", `[Step 6/8] AI agent loading and configuring "repo-analyzer" skill...`);
@@ -555,7 +574,9 @@ export function App() {
         throw new Error(errDetail);
       }
 
-      addLog("info", `[Step 6/8] Skill loaded: ${skillData.skill_name} (${skillData.pillars_loaded.join(", ")})`);
+      const step6Duration = skillData.duration_ms || (Date.now() - step6Start);
+
+      addLog("info", `[Step 6/8] Skill loaded: ${skillData.skill_name} (${skillData.pillars_loaded.join(", ")}) in ${step6Duration}ms`);
       addLog("info", `[Step 6/8] Evaluation checklist compiled: ${skillData.total_rules_count} criteria across 4 pillars`);
       if (Array.isArray(skillData.pillar_breakdowns)) {
         for (const pb of skillData.pillar_breakdowns) {
@@ -574,21 +595,22 @@ export function App() {
         pillarBreakdowns: skillData.pillar_breakdowns || [],
         schemaValid: skillData.schema_valid,
         schemaTitle: skillData.schema_title,
-        durationMs: skillData.duration_ms,
+        durationMs: step6Duration,
         status: skillData.status,
       });
 
-      // Mark Step 6 completed
+      // Mark Step 6 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 5 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 5 ? { ...s, status: "completed", durationMs: step6Duration } : s))
       );
 
       // ==========================================
       // STEP 7: Perform Repository Analysis
       // ==========================================
+      const step7Start = Date.now();
       setCurrentStepIndex(6);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 6 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 6 ? { ...s, status: "running", startTime: step7Start } : s))
       );
 
       addLog("system", `[Step 7/8] Commencing deep repository analysis across 4 evaluation pillars...`);
@@ -628,7 +650,9 @@ export function App() {
         throw new Error(errDetail);
       }
 
-      addLog("info", `[Step 7/8] Primary Pattern: ${analysisData.detected_architecture} (${analysisData.primary_language})`);
+      const step7Duration = analysisData.duration_ms || (Date.now() - step7Start);
+
+      addLog("info", `[Step 7/8] Primary Pattern: ${analysisData.detected_architecture} (${analysisData.primary_language}) in ${step7Duration}ms`);
       addLog("info", `[Step 7/8] Overall Score: ${analysisData.overall_score}/100 — Grade ${analysisData.grade}`);
       addLog("info", `[Step 7/8] Checklist Outcomes: ${analysisData.passed_rules_count}/${analysisData.total_rules_evaluated} criteria passed`);
       if (analysisData.pillar_scores) {
@@ -652,21 +676,22 @@ export function App() {
         failedRulesCount: analysisData.failed_rules_count,
         executiveSummary: analysisData.executive_summary,
         pillars: analysisData.pillars || [],
-        durationMs: analysisData.duration_ms,
+        durationMs: step7Duration,
         status: analysisData.status,
       });
 
-      // Mark Step 7 completed
+      // Mark Step 7 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 6 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 6 ? { ...s, status: "completed", durationMs: step7Duration } : s))
       );
 
       // ==========================================
       // STEP 8: Generate Formatted Output
       // ==========================================
+      const step8Start = Date.now();
       setCurrentStepIndex(7);
       setSteps((prev) =>
-        prev.map((s, i) => (i === 7 ? { ...s, status: "running" } : s))
+        prev.map((s, i) => (i === 7 ? { ...s, status: "running", startTime: step8Start } : s))
       );
 
       addLog("system", `[Step 8/8] Generating formatted output strictly adhering to repo-analyzer specifications...`);
@@ -704,7 +729,9 @@ export function App() {
         throw new Error(errDetail);
       }
 
-      addLog("info", `[Step 8/8] Report schema validated: ${reportData.schema_valid ? "Yes (Draft-07 Verified)" : "No"}`);
+      const step8Duration = reportData.duration_ms || (Date.now() - step8Start);
+
+      addLog("info", `[Step 8/8] Report schema validated: ${reportData.schema_valid ? "Yes (Draft-07 Verified)" : "No"} in ${step8Duration}ms`);
       addLog("info", `[Step 8/8] Synthesized Markdown block ready for export (${reportData.frontend_report.rawMarkdownOutput.length} bytes).`);
       addLog("agent", `[Step 8/8] Step 8 Complete: Structured report generated strictly conforming to repo-analyzer skill.`);
       addLog("system", `[Pipeline Complete] All 8 lifecycle stages successfully executed. Interactive Report Dashboard online.`);
@@ -712,9 +739,9 @@ export function App() {
       // Set frontend report state to render ReportDashboard
       setReport(reportData.frontend_report);
 
-      // Mark Step 8 completed
+      // Mark Step 8 completed with durationMs
       setSteps((prev) =>
-        prev.map((s, i) => (i === 7 ? { ...s, status: "completed" } : s))
+        prev.map((s, i) => (i === 7 ? { ...s, status: "completed", durationMs: step8Duration } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -723,7 +750,7 @@ export function App() {
       addLog("warn", `[Pipeline Failure] ${msg}`);
       setErrorMessage(msg);
       setSteps((prev) =>
-        prev.map((s) => (s.status === "running" ? { ...s, status: "failed" } : s))
+        prev.map((s) => (s.status === "running" ? { ...s, status: "failed", durationMs: s.startTime ? Date.now() - s.startTime : undefined } : s))
       );
       setCurrentStepIndex(-1);
       setIsAnalyzing(false);
@@ -828,12 +855,12 @@ export function App() {
                     <CheckCircle2 className="h-5 w-5" strokeWidth={2.1} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-bold uppercase tracking-wider text-accent">
                         Step 1
                       </span>
-                      <span className="font-mono text-[11px] text-muted-foreground truncate">
-                        {step1Session.sessionId.slice(0, 8)}...
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {step1Session.durationMs !== undefined ? `${step1Session.durationMs}ms` : `${step1Session.sessionId.slice(0, 8)}...`}
                       </span>
                     </div>
                     <h3 className="text-xs font-bold text-foreground truncate mt-1" title={`${step1Session.owner}/${step1Session.repoName}`}>
@@ -891,7 +918,7 @@ export function App() {
                           <span>Step 3</span>
                         </span>
                         <span className="font-mono text-[10px] text-muted-foreground">
-                          {step3WorkingDirInfo.isGitWorktree ? "Worktree" : "Local Dir"}
+                          {step3WorkingDirInfo.durationMs !== undefined ? `${step3WorkingDirInfo.durationMs}ms` : (step3WorkingDirInfo.isGitWorktree ? "Worktree" : "Local Dir")}
                         </span>
                       </div>
                       <p className="text-xs font-mono font-bold text-foreground truncate mt-1" title={step3WorkingDirInfo.workingDir}>
@@ -939,7 +966,7 @@ export function App() {
                           <span>Step 4</span>
                         </span>
                         <span className="font-mono text-[10px] text-muted-foreground">
-                          PID: {step4AgentInfo.pid ?? "active"}
+                          {step4AgentInfo.durationMs}ms
                         </span>
                       </div>
                       <p className="text-xs font-bold text-foreground truncate mt-1">
@@ -947,10 +974,10 @@ export function App() {
                       </p>
                       <div className="flex items-center gap-2 mt-2">
                         <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-mono font-bold text-primary border border-primary/25">
-                          agy v{step4AgentInfo.agentVersion}
+                          PID: {step4AgentInfo.pid ?? "active"}
                         </span>
                         <span className="text-[10px] font-mono text-muted-foreground truncate" title={step4AgentInfo.defaultModel}>
-                          {step4AgentInfo.defaultModel}
+                          agy v{step4AgentInfo.agentVersion}
                         </span>
                       </div>
                     </div>
